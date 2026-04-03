@@ -221,13 +221,75 @@ function subscribeInstrument(client: BybitClient, instrument: InstrumentConfig):
 async function periodicCheck(): Promise<void> {
   const state = getState();
   const config = getConfig();
-  if (state.status !== "running" || !config.active) return;
+  if (state.status !== "running") return;
 
   const client = globalState.__bybit_client;
   if (!client) return;
 
+  // Sync pozic z Binance a kontrola SL/TP
+  await syncAndCheckPositions(client, config);
+
+  // Generuj signály a obchoduj jen pokud je aktivní
+  if (!config.active) return;
   for (const inst of config.instruments.filter((i) => i.enabled)) {
     await evaluateInstrument(client, inst);
+  }
+}
+
+async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Promise<void> {
+  try {
+    const positions = await client.getPositions();
+    const openPositions: Trade[] = positions.list
+      .filter((p) => parseFloat(p.size) > 0)
+      .map((p) => ({
+        id: `bybit_${p.symbol}_${p.side}`,
+        symbol: p.symbol,
+        direction: p.side === "Buy" ? "BUY" as const : "SELL" as const,
+        volume: parseFloat(p.size),
+        openPrice: parseFloat(p.avgPrice),
+        openTime: Date.now(),
+        sl: 0, tp: 0,
+        profit: parseFloat(p.unrealisedPnl),
+        status: "open" as const,
+        signal: {
+          type: (p.side === "Buy" ? "BUY" : "SELL") as "BUY" | "SELL",
+          symbol: p.symbol, price: parseFloat(p.avgPrice), timestamp: Date.now(),
+          confidence: 0, reasons: ["Sync"],
+          indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, timestamp: Date.now() },
+        },
+      }));
+
+    // Server-side stop-loss: zavři pozice s > 1% ztrátou
+    for (const pos of openPositions) {
+      const lossPercent = pos.openPrice > 0
+        ? (Math.abs(pos.profit || 0) / (pos.openPrice * pos.volume)) * 100
+        : 0;
+      if ((pos.profit || 0) < 0 && lossPercent > 1) {
+        console.log(`[SL] Zavírám ${pos.symbol} ${pos.direction} — ztráta ${pos.profit?.toFixed(2)} (${lossPercent.toFixed(1)}%)`);
+        try {
+          await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
+        } catch (err) {
+          console.error(`[SL] Chyba při zavírání: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+    }
+
+    // Update P&L
+    const todayPnL = openPositions.reduce((sum, p) => sum + (p.profit || 0), 0);
+    setState({ openPositions, todayPnL });
+
+    // Kill switch
+    if (todayPnL <= -config.risk.maxDailyLoss) {
+      console.log(`[KILL SWITCH] Denní ztráta ${todayPnL.toFixed(2)} překročila limit -${config.risk.maxDailyLoss}`);
+      for (const pos of openPositions) {
+        try {
+          await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
+        } catch { /* ok */ }
+      }
+      setState({ status: "killed", error: `Kill switch: denní ztráta ${todayPnL.toFixed(2)} USDT` });
+    }
+  } catch {
+    // API chyba — přeskočit
   }
 }
 
