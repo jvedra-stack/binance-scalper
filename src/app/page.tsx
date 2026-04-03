@@ -4,10 +4,9 @@ import { useEngine } from "@/lib/hooks/useEngine";
 import StatusBadge from "@/components/StatusBadge";
 
 export default function Dashboard() {
-  const { state, config, start, stop, toggleBot, closeAll, hydrated } = useEngine();
+  const { state, config, start, stop, toggleBot, closeAll, hydrated, hasCredentials } = useEngine();
 
   const isRunning = state.status === "running";
-  const hasCredentials = hydrated && !!config.credentials.apiKey;
 
   return (
     <div className="space-y-6">

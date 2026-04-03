@@ -17,27 +17,28 @@ export function useEngine() {
   const [state, setState] = useState<EngineState>(DEFAULT_STATE);
   const [config, setConfig] = useState<BotConfig>(DEFAULT_CONFIG);
   const [hydrated, setHydrated] = useState(false);
+  const [serverHasCredentials, setServerHasCredentials] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Načti config z localStorage až po hydration
   useEffect(() => {
     setConfig(loadConfig());
     setHydrated(true);
   }, []);
 
-  // Poll stav ze serveru
   const fetchState = useCallback(async () => {
     try {
       const res = await fetch("/api/xtb/state");
       if (res.ok) {
         const data = await res.json();
         setState(data.state);
+        if (data.hasServerCredentials !== undefined) {
+          setServerHasCredentials(data.hasServerCredentials);
+        }
       }
     } catch { /* ok */ }
   }, []);
 
-  // SSE pro real-time updaty
   useEffect(() => {
     pollRef.current = setInterval(fetchState, 2000);
     fetchState();
@@ -101,17 +102,21 @@ export function useEngine() {
   }, [config.active, updateConfig]);
 
   const closePosition = useCallback(async (_tradeId: string) => {
-    // TODO: implementovat přes API route
+    // TODO
   }, []);
 
   const closeAll = useCallback(async () => {
-    // TODO: implementovat přes API route
+    // TODO
   }, []);
+
+  // Credentials existují buď v localStorage NEBO na serveru (env vars)
+  const hasCredentials = hydrated && (!!config.credentials.apiKey || serverHasCredentials);
 
   return {
     state,
     config,
     hydrated,
+    hasCredentials,
     start,
     stop,
     updateConfig,

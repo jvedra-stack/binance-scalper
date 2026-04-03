@@ -4,9 +4,11 @@ import { getEngineState, getEngineConfig, getAllTrades } from "@/lib/bybit/conne
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const config = getEngineConfig();
   return NextResponse.json({
     state: getEngineState(),
     config: getEngineConfig(),
     trades: getAllTrades(),
+    hasServerCredentials: !!(config.credentials.apiKey && config.credentials.apiSecret),
   });
 }
