@@ -1,10 +1,12 @@
 // ============================================================
-// Server-side singleton pro Bybit spojení
+// Server-side singleton pro Binance Futures spojení
+// S garantovaným SL/TP, trade persistencí a dynamickým sizingem
 // ============================================================
 
 import { BybitClient } from "./client";
-import { generateSignal } from "@/lib/strategy/scalping";
+import { generateSignal, dynamicPositionSize } from "@/lib/strategy/scalping";
 import { checkRisk, calculateSLTP } from "@/lib/risk/manager";
+import { loadServerTrades, saveServerTrades, addServerTrade } from "@/lib/server-store";
 import type {
   BybitCredentials,
   BybitKline,
@@ -16,7 +18,6 @@ import type {
 } from "@/types";
 import { DEFAULT_STRATEGY, DEFAULT_RISK, DEFAULT_INSTRUMENTS } from "@/types";
 
-// Adaptér: Bybit kline → formát pro strategii (kompatibilní s XTBCandleRecord)
 function klineToCandle(k: BybitKline) {
   return { close: k.close, ctm: k.start, ctmString: "", high: k.high, low: k.low, open: k.open, vol: k.volume };
 }
@@ -26,7 +27,6 @@ const globalState = globalThis as unknown as {
   __bybit_state?: EngineState;
   __bybit_config?: BotConfig;
   __bybit_candles?: Map<string, BybitKline[]>;
-  __bybit_trades?: Trade[];
   __bybit_check_interval?: ReturnType<typeof setInterval>;
   __bybit_listeners?: Array<(event: string, data: unknown) => void>;
 };
@@ -34,11 +34,7 @@ const globalState = globalThis as unknown as {
 function getState(): EngineState {
   if (!globalState.__bybit_state) {
     globalState.__bybit_state = {
-      status: "stopped",
-      openPositions: [],
-      todayTrades: [],
-      todayPnL: 0,
-      signals: [],
+      status: "stopped", openPositions: [], todayTrades: [], todayPnL: 0, signals: [],
     };
   }
   return globalState.__bybit_state;
@@ -52,11 +48,9 @@ function setState(partial: Partial<EngineState>): void {
 
 function getConfig(): BotConfig {
   if (!globalState.__bybit_config) {
-    // Env vars mají prioritu
     const apiKey = process.env.BINANCE_API_KEY || "";
     const apiSecret = process.env.BINANCE_API_SECRET || "";
     const testnet = process.env.BINANCE_TESTNET === "true";
-
     globalState.__bybit_config = {
       credentials: { apiKey, apiSecret, testnet },
       instruments: DEFAULT_INSTRUMENTS,
@@ -73,9 +67,13 @@ function getCandleBuffers(): Map<string, BybitKline[]> {
   return globalState.__bybit_candles;
 }
 
+// Trade historie — načítá se z JSON souboru na serveru
 function getTrades(): Trade[] {
-  if (!globalState.__bybit_trades) globalState.__bybit_trades = [];
-  return globalState.__bybit_trades;
+  return loadServerTrades();
+}
+
+function saveTrade(trade: Trade): void {
+  addServerTrade(trade);
 }
 
 // --- Public API ---
@@ -95,11 +93,11 @@ export function getAllTrades(): Trade[] { return getTrades(); }
 export async function closeAllPositions(): Promise<void> {
   const client = globalState.__bybit_client;
   if (!client) return;
-  const state = getState();
-  for (const pos of state.openPositions) {
+  for (const pos of getState().openPositions) {
     try {
       await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
-      console.log(`[CLOSE] Zavřena pozice ${pos.symbol} ${pos.direction}`);
+      saveTrade({ ...pos, status: "closed", closeTime: Date.now(), profit: pos.profit || 0 });
+      console.log(`[CLOSE] ${pos.symbol} ${pos.direction} P&L: ${pos.profit?.toFixed(2)}`);
     } catch (err) {
       console.error(`[CLOSE] Chyba: ${err instanceof Error ? err.message : err}`);
     }
@@ -114,14 +112,11 @@ export function updateConfig(config: Partial<BotConfig>): BotConfig {
 
 export async function startEngine(config: BotConfig): Promise<void> {
   if (globalState.__bybit_client?.isConnected) stopEngine();
-
   globalState.__bybit_config = config;
   setState({ status: "connecting", error: undefined });
 
   try {
     const client = new BybitClient(config.credentials);
-
-    // Test connection + auth
     const balance = await client.getBalance();
     const totalEquity = parseFloat(balance.list?.[0]?.totalEquity || "0");
 
@@ -129,11 +124,10 @@ export async function startEngine(config: BotConfig): Promise<void> {
     globalState.__bybit_client = client;
 
     client.setDisconnectHandler(() => {
-      setState({ status: "error", error: "Odpojeno od Bybit" });
+      setState({ status: "error", error: "Odpojeno od Binance" });
       stopEngine();
     });
 
-    // Načti historické kline
     const enabled = config.instruments.filter((i) => i.enabled);
     for (const inst of enabled) {
       await loadKlineHistory(client, inst.symbol);
@@ -146,7 +140,7 @@ export async function startEngine(config: BotConfig): Promise<void> {
       const openPositions: Trade[] = positions.list
         .filter((p) => parseFloat(p.size) > 0)
         .map((p) => ({
-          id: `bybit_${p.symbol}_${p.side}`,
+          id: `pos_${p.symbol}_${p.side}`,
           symbol: p.symbol,
           direction: p.side === "Buy" ? "BUY" as const : "SELL" as const,
           volume: parseFloat(p.size),
@@ -159,7 +153,7 @@ export async function startEngine(config: BotConfig): Promise<void> {
           signal: {
             type: (p.side === "Buy" ? "BUY" : "SELL") as "BUY" | "SELL",
             symbol: p.symbol, price: parseFloat(p.avgPrice), timestamp: Date.now(),
-            confidence: 0, reasons: ["Synchronizováno z Bybit"],
+            confidence: 0, reasons: ["Sync z Binance"],
             indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, timestamp: Date.now() },
           },
         }));
@@ -169,7 +163,7 @@ export async function startEngine(config: BotConfig): Promise<void> {
     setState({ status: "running", connectedAt: Date.now(), error: undefined, balance: totalEquity });
 
     if (globalState.__bybit_check_interval) clearInterval(globalState.__bybit_check_interval);
-    globalState.__bybit_check_interval = setInterval(() => periodicCheck(), 10000);
+    globalState.__bybit_check_interval = setInterval(() => periodicCheck(), 8000);
 
   } catch (err) {
     setState({ status: "error", error: err instanceof Error ? err.message : "Neznámá chyba" });
@@ -197,18 +191,12 @@ export function getClient(): BybitClient | undefined {
 async function loadKlineHistory(client: BybitClient, symbol: string): Promise<void> {
   try {
     const result = await client.getKlines(symbol, "1", 100);
-    // Bybit vrací klines jako string[][] ve formátu [startTime, open, high, low, close, volume, turnover]
     const klines: BybitKline[] = (result.list || []).map((k: string[]) => ({
-      start: parseInt(k[0]),
-      end: parseInt(k[0]) + 60000,
-      open: parseFloat(k[1]),
-      high: parseFloat(k[2]),
-      low: parseFloat(k[3]),
-      close: parseFloat(k[4]),
-      volume: parseFloat(k[5]),
-      turnover: parseFloat(k[6]),
-    })).reverse(); // Bybit vrací od nejnovější, my chceme od nejstarší
-
+      start: parseInt(k[0]), end: parseInt(k[0]) + 60000,
+      open: parseFloat(k[1]), high: parseFloat(k[2]),
+      low: parseFloat(k[3]), close: parseFloat(k[4]),
+      volume: parseFloat(k[5]), turnover: parseFloat(k[6]),
+    })).reverse();
     getCandleBuffers().set(symbol, klines);
   } catch {
     getCandleBuffers().set(symbol, []);
@@ -241,10 +229,8 @@ async function periodicCheck(): Promise<void> {
   const client = globalState.__bybit_client;
   if (!client) return;
 
-  // Sync pozic z Binance a kontrola SL/TP
   await syncAndCheckPositions(client, config);
 
-  // Generuj signály a obchoduj jen pokud je aktivní
   if (!config.active) return;
   for (const inst of config.instruments.filter((i) => i.enabled)) {
     await evaluateInstrument(client, inst);
@@ -257,7 +243,7 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
     const openPositions: Trade[] = positions.list
       .filter((p) => parseFloat(p.size) > 0)
       .map((p) => ({
-        id: `bybit_${p.symbol}_${p.side}`,
+        id: `pos_${p.symbol}_${p.side}`,
         symbol: p.symbol,
         direction: p.side === "Buy" ? "BUY" as const : "SELL" as const,
         volume: parseFloat(p.size),
@@ -274,52 +260,75 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
         },
       }));
 
-    // Server-side stop-loss: zavři pozice s > 1% ztrátou
+    // Server-side SL: zavři pozice s > 0.8% ztrátou (agresivnější SL)
     for (const pos of openPositions) {
-      const lossPercent = pos.openPrice > 0
-        ? (Math.abs(pos.profit || 0) / (pos.openPrice * pos.volume)) * 100
-        : 0;
-      if ((pos.profit || 0) < 0 && lossPercent > 1) {
+      const posValue = pos.openPrice * pos.volume;
+      const lossPercent = posValue > 0 ? (Math.abs(pos.profit || 0) / posValue) * 100 : 0;
+      if ((pos.profit || 0) < 0 && lossPercent > 0.8) {
         console.log(`[SL] Zavírám ${pos.symbol} ${pos.direction} — ztráta ${pos.profit?.toFixed(2)} (${lossPercent.toFixed(1)}%)`);
         try {
           await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
+          saveTrade({ ...pos, status: "closed", closeTime: Date.now(), profit: pos.profit || 0 });
         } catch (err) {
-          console.error(`[SL] Chyba při zavírání: ${err instanceof Error ? err.message : err}`);
+          console.error(`[SL] Chyba: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      // Server-side TP: zavři pozice s > 0.5% ziskem
+      if ((pos.profit || 0) > 0 && lossPercent > 0.5) {
+        console.log(`[TP] Zavírám ${pos.symbol} ${pos.direction} — zisk ${pos.profit?.toFixed(2)} (${lossPercent.toFixed(1)}%)`);
+        try {
+          await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
+          saveTrade({ ...pos, status: "closed", closeTime: Date.now(), profit: pos.profit || 0 });
+        } catch (err) {
+          console.error(`[TP] Chyba: ${err instanceof Error ? err.message : err}`);
         }
       }
     }
 
-    // Detekuj zavřené pozice (byly v předchozím stavu, ale už nejsou)
+    // Detekuj zavřené pozice
     const prevPositions = getState().openPositions;
     for (const prev of prevPositions) {
       const stillOpen = openPositions.find((p) => p.symbol === prev.symbol && p.direction === prev.direction);
       if (!stillOpen) {
-        // Pozice byla zavřena — ulož do historie
-        const closedTrade: Trade = {
-          ...prev,
-          status: "closed",
-          closeTime: Date.now(),
-          closePrice: 0,
-          profit: prev.profit || 0,
-        };
-        getTrades().push(closedTrade);
+        saveTrade({ ...prev, status: "closed", closeTime: Date.now(), closePrice: 0, profit: prev.profit || 0 });
         console.log(`[CLOSED] ${prev.symbol} ${prev.direction} P&L: ${prev.profit?.toFixed(2)}`);
       }
     }
 
-    // Update P&L
-    const todayPnL = openPositions.reduce((sum, p) => sum + (p.profit || 0), 0);
-    setState({ openPositions, todayPnL });
+    // Refresh open positions
+    const freshPositions = positions.list
+      .filter((p) => parseFloat(p.size) > 0)
+      .map((p) => ({
+        id: `pos_${p.symbol}_${p.side}`,
+        symbol: p.symbol,
+        direction: p.side === "Buy" ? "BUY" as const : "SELL" as const,
+        volume: parseFloat(p.size),
+        openPrice: parseFloat(p.avgPrice),
+        openTime: Date.now(),
+        sl: 0, tp: 0,
+        profit: parseFloat(p.unrealisedPnl),
+        status: "open" as const,
+        signal: {
+          type: (p.side === "Buy" ? "BUY" : "SELL") as "BUY" | "SELL",
+          symbol: p.symbol, price: parseFloat(p.avgPrice), timestamp: Date.now(),
+          confidence: 0, reasons: ["Sync"],
+          indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, timestamp: Date.now() },
+        },
+      }));
+
+    const todayPnL = freshPositions.reduce((sum, p) => sum + (p.profit || 0), 0);
+    setState({ openPositions: freshPositions, todayPnL });
 
     // Kill switch
     if (todayPnL <= -config.risk.maxDailyLoss) {
-      console.log(`[KILL SWITCH] Denní ztráta ${todayPnL.toFixed(2)} překročila limit -${config.risk.maxDailyLoss}`);
-      for (const pos of openPositions) {
+      console.log(`[KILL SWITCH] Denní ztráta ${todayPnL.toFixed(2)} USDT`);
+      for (const pos of freshPositions) {
         try {
           await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
+          saveTrade({ ...pos, status: "closed", closeTime: Date.now(), profit: pos.profit || 0 });
         } catch { /* ok */ }
       }
-      setState({ status: "killed", error: `Kill switch: denní ztráta ${todayPnL.toFixed(2)} USDT` });
+      setState({ status: "killed", error: `Kill switch: ztráta ${todayPnL.toFixed(2)} USDT` });
     }
   } catch {
     // API chyba — přeskočit
@@ -347,14 +356,19 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
   const riskCheck = checkRisk(signal, state.openPositions, state.todayTrades, state.todayPnL, config.risk);
   if (!riskCheck.allowed) return;
 
-  // Execute trade
+  // Dynamický position sizing
+  const recentTrades = getTrades().slice(-10).map((t) => ({ profit: t.profit || 0 }));
+  const adjustedVolume = dynamicPositionSize(instrument.volume, recentTrades);
+
+  // Garantovaný SL/TP
   const { sl, tp } = calculateSLTP(signal, instrument, signal.indicators.atr);
+
   try {
     const result = await client.placeOrder({
       symbol: instrument.symbol,
       side: signal.type === "BUY" ? "Buy" : "Sell",
       orderType: "Market",
-      qty: instrument.volume.toString(),
+      qty: adjustedVolume.toFixed(0),
       stopLoss: sl.toFixed(2),
       takeProfit: tp.toFixed(2),
     });
@@ -364,7 +378,7 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
       orderId: result.orderId,
       symbol: signal.symbol,
       direction: signal.type as "BUY" | "SELL",
-      volume: instrument.volume,
+      volume: adjustedVolume,
       openPrice: signal.price,
       openTime: Date.now(),
       sl, tp,
@@ -372,7 +386,9 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
       signal,
     };
 
-    getTrades().push(trade);
+    saveTrade(trade);
+    console.log(`[TRADE] ${signal.type} ${instrument.symbol} @ ${signal.price} | Vol: ${adjustedVolume} | SL: ${sl.toFixed(2)} TP: ${tp.toFixed(2)} | Conf: ${(signal.confidence * 100).toFixed(0)}%`);
+
     setState({
       openPositions: [...state.openPositions, trade],
       todayTrades: [...state.todayTrades, trade],
