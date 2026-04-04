@@ -169,7 +169,7 @@ export async function startEngine(config: BotConfig): Promise<void> {
     setState({ status: "running", connectedAt: Date.now(), error: undefined, balance: totalEquity });
 
     if (globalState.__bybit_check_interval) clearInterval(globalState.__bybit_check_interval);
-    globalState.__bybit_check_interval = setInterval(() => periodicCheck(), 5000);
+    globalState.__bybit_check_interval = setInterval(() => periodicCheck(), 10000);
 
   } catch (err) {
     setState({ status: "error", error: err instanceof Error ? err.message : "Neznámá chyba" });
@@ -196,7 +196,7 @@ export function getClient(): BybitClient | undefined {
 
 async function loadKlineHistory(client: BybitClient, symbol: string): Promise<void> {
   try {
-    const result = await client.getKlines(symbol, "1", 200);
+    const result = await client.getKlines(symbol, "1", 100);
     // Bybit vrací klines jako string[][] ve formátu [startTime, open, high, low, close, volume, turnover]
     const klines: BybitKline[] = (result.list || []).map((k: string[]) => ({
       start: parseInt(k[0]),
@@ -228,7 +228,7 @@ function subscribeInstrument(client: BybitClient, instrument: InstrumentConfig):
     } else {
       buffer.push(kline);
     }
-    if (buffer.length > 200) buffer.shift();
+    if (buffer.length > 100) buffer.shift();
     getCandleBuffers().set(instrument.symbol, buffer);
   });
 }

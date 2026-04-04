@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
         tpPercent: 0.4,
       }));
 
-    instruments = [...fromBacktest, ...extraPairs].slice(0, 12); // max 12 instrumentů
+    instruments = [...fromBacktest, ...extraPairs].slice(0, 8); // max 8 instrumentů (RAM limit)
 
     if (instruments.length === 0) {
       // Absolutní fallback
