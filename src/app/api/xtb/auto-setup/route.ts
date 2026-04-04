@@ -51,11 +51,8 @@ export async function POST(req: NextRequest) {
     const tickersResult = await client.getTickers();
     const tickerMap = new Map(tickersResult.list.map((t) => [t.symbol, t]));
 
-    // Filtruj kandidáty co existují a mají dostatečný volume
-    const available = CANDIDATES.filter((s) => {
-      const t = tickerMap.get(s);
-      return t && parseFloat(t.volume24h) > 1000000;
-    });
+    // Filtruj kandidáty co existují na Binance (bez volume filtru)
+    const available = CANDIDATES.filter((s) => tickerMap.has(s));
 
     // Backtest na každém
     const backtestResults: BacktestResult[] = [];
@@ -83,27 +80,45 @@ export async function POST(req: NextRequest) {
     // Risk config podle zůstatku
     const risk = calculateRisk(totalEquity);
 
-    // Instrumenty — pokud backtest nic nenašel, použij defaultní
+    // Instrumenty — vždy přidej všechny dostupné, backtest jen seřadí
     let instruments: InstrumentConfig[];
-    if (topSymbols.length > 0) {
-      instruments = topSymbols.map((r) => ({
+
+    // Začni s backtestovanými (seřazené podle score)
+    const selectedSymbols = new Set<string>();
+    const fromBacktest: InstrumentConfig[] = topSymbols.map((r) => {
+      selectedSymbols.add(r.symbol);
+      return {
         symbol: r.symbol,
         label: r.label,
         enabled: true,
         volume: calculateVolume(r.symbol, totalEquity),
         slPercent: 0.5,
         tpPercent: 0.3,
+      };
+    });
+
+    // Doplň dalšími dostupnými coiny které backtest nepokryl
+    const extraPairs = available
+      .filter((s) => !selectedSymbols.has(s))
+      .map((s) => ({
+        symbol: s,
+        label: s.replace("USDT", ""),
+        enabled: true,
+        volume: calculateVolume(s, totalEquity),
+        slPercent: 0.6,
+        tpPercent: 0.4,
       }));
-    } else {
-      // Fallback — top krypto páry co jsou na každém Binance
+
+    instruments = [...fromBacktest, ...extraPairs].slice(0, 12); // max 12 instrumentů
+
+    if (instruments.length === 0) {
+      // Absolutní fallback
       const fallbackPairs = [
         { symbol: "BTCUSDT", label: "Bitcoin" },
         { symbol: "ETHUSDT", label: "Ethereum" },
         { symbol: "SOLUSDT", label: "Solana" },
       ];
-      // Ověř že existují
-      const validPairs = fallbackPairs.filter((p) => tickerMap.has(p.symbol));
-      instruments = (validPairs.length > 0 ? validPairs : fallbackPairs).map((p) => ({
+      instruments = fallbackPairs.map((p) => ({
         symbol: p.symbol,
         label: p.label,
         enabled: true,
