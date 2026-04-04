@@ -7,11 +7,14 @@ import { DEFAULT_STRATEGY } from "@/types";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Top krypto páry pro scalping
+// Top krypto páry pro scalping — volatilní coiny
 const CANDIDATES = [
   "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
-  "AVAXUSDT", "ADAUSDT", "MATICUSDT", "LINKUSDT", "DOTUSDT",
+  "AVAXUSDT", "ADAUSDT", "LINKUSDT", "DOTUSDT",
   "NEARUSDT", "ARBUSDT", "OPUSDT", "SUIUSDT", "PEPEUSDT",
+  "WIFUSDT", "BONKUSDT", "FLOKIUSDT", "SHIBUSDT",
+  "APTUSDT", "INJUSDT", "FETUSDT", "RUNEUSDT",
+  "ONDOUSDT", "JUPUSDT", "ENAUSDT", "WUSDT",
 ];
 
 interface BacktestResult {
@@ -75,7 +78,7 @@ export async function POST(req: NextRequest) {
     }
 
     backtestResults.sort((a, b) => b.score - a.score);
-    const topSymbols = backtestResults.slice(0, 3);
+    const topSymbols = backtestResults.slice(0, 8);
 
     // Risk config podle zůstatku
     const risk = calculateRisk(totalEquity);

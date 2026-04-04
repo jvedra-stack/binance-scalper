@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { loadTrades } from "@/lib/store";
 import type { Trade } from "@/types";
 
 export default function TradesPage() {
@@ -9,8 +8,17 @@ export default function TradesPage() {
   const [filter, setFilter] = useState<"all" | "open" | "closed">("all");
 
   useEffect(() => {
-    setTrades(loadTrades());
-    const interval = setInterval(() => setTrades(loadTrades()), 5000);
+    async function fetchTrades() {
+      try {
+        const res = await fetch("/api/xtb/state");
+        if (res.ok) {
+          const data = await res.json();
+          setTrades(data.trades || []);
+        }
+      } catch { /* ok */ }
+    }
+    fetchTrades();
+    const interval = setInterval(fetchTrades, 5000);
     return () => clearInterval(interval);
   }, []);
 

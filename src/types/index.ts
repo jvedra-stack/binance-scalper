@@ -195,9 +195,14 @@ export interface EngineState {
 // --- Defaultní konfigurace ---
 
 export const DEFAULT_INSTRUMENTS: InstrumentConfig[] = [
-  { symbol: "BTCUSDT", label: "Bitcoin", enabled: true, volume: 20, slPercent: 0.5, tpPercent: 0.3 },
-  { symbol: "ETHUSDT", label: "Ethereum", enabled: true, volume: 20, slPercent: 0.5, tpPercent: 0.3 },
-  { symbol: "SOLUSDT", label: "Solana", enabled: false, volume: 20, slPercent: 0.7, tpPercent: 0.4 },
+  { symbol: "BTCUSDT", label: "Bitcoin", enabled: true, volume: 15, slPercent: 0.5, tpPercent: 0.3 },
+  { symbol: "ETHUSDT", label: "Ethereum", enabled: true, volume: 15, slPercent: 0.5, tpPercent: 0.3 },
+  { symbol: "SOLUSDT", label: "Solana", enabled: true, volume: 15, slPercent: 0.7, tpPercent: 0.4 },
+  { symbol: "DOGEUSDT", label: "Doge", enabled: true, volume: 15, slPercent: 0.8, tpPercent: 0.5 },
+  { symbol: "PEPEUSDT", label: "Pepe", enabled: true, volume: 15, slPercent: 1.0, tpPercent: 0.6 },
+  { symbol: "XRPUSDT", label: "XRP", enabled: true, volume: 15, slPercent: 0.6, tpPercent: 0.4 },
+  { symbol: "AVAXUSDT", label: "Avalanche", enabled: true, volume: 15, slPercent: 0.7, tpPercent: 0.5 },
+  { symbol: "SUIUSDT", label: "Sui", enabled: true, volume: 15, slPercent: 0.8, tpPercent: 0.5 },
 ];
 
 export const DEFAULT_STRATEGY: StrategyConfig = {
@@ -209,11 +214,11 @@ export const DEFAULT_STRATEGY: StrategyConfig = {
   bbPeriod: 20,
   bbStdDev: 2,
   atrPeriod: 14,
-  minConfidence: 0.6,
+  minConfidence: 0.45,
 };
 
 export const DEFAULT_RISK: RiskConfig = {
-  maxOpenPositions: 2,
+  maxOpenPositions: 4,
   maxDailyLoss: 50, // USDT
   maxDailyTrades: 20,
   trailingStop: true,

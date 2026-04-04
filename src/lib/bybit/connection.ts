@@ -92,6 +92,21 @@ export function getEngineState(): EngineState { return getState(); }
 export function getEngineConfig(): BotConfig { return getConfig(); }
 export function getAllTrades(): Trade[] { return getTrades(); }
 
+export async function closeAllPositions(): Promise<void> {
+  const client = globalState.__bybit_client;
+  if (!client) return;
+  const state = getState();
+  for (const pos of state.openPositions) {
+    try {
+      await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
+      console.log(`[CLOSE] Zavřena pozice ${pos.symbol} ${pos.direction}`);
+    } catch (err) {
+      console.error(`[CLOSE] Chyba: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  setState({ openPositions: [] });
+}
+
 export function updateConfig(config: Partial<BotConfig>): BotConfig {
   globalState.__bybit_config = { ...getConfig(), ...config };
   return globalState.__bybit_config;
@@ -271,6 +286,24 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
         } catch (err) {
           console.error(`[SL] Chyba při zavírání: ${err instanceof Error ? err.message : err}`);
         }
+      }
+    }
+
+    // Detekuj zavřené pozice (byly v předchozím stavu, ale už nejsou)
+    const prevPositions = getState().openPositions;
+    for (const prev of prevPositions) {
+      const stillOpen = openPositions.find((p) => p.symbol === prev.symbol && p.direction === prev.direction);
+      if (!stillOpen) {
+        // Pozice byla zavřena — ulož do historie
+        const closedTrade: Trade = {
+          ...prev,
+          status: "closed",
+          closeTime: Date.now(),
+          closePrice: 0,
+          profit: prev.profit || 0,
+        };
+        getTrades().push(closedTrade);
+        console.log(`[CLOSED] ${prev.symbol} ${prev.direction} P&L: ${prev.profit?.toFixed(2)}`);
       }
     }
 

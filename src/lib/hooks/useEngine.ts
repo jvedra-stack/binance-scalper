@@ -102,11 +102,11 @@ export function useEngine() {
   }, [config.active, updateConfig]);
 
   const closePosition = useCallback(async (_tradeId: string) => {
-    // TODO
+    await fetch("/api/xtb/close-all", { method: "POST" });
   }, []);
 
   const closeAll = useCallback(async () => {
-    // TODO
+    await fetch("/api/xtb/close-all", { method: "POST" });
   }, []);
 
   // Credentials existují buď v localStorage NEBO na serveru (env vars)
