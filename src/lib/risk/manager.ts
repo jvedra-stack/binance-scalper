@@ -90,3 +90,87 @@ export function shouldResetDaily(lastResetTimestamp: number): boolean {
   const lastReset = new Date(lastResetTimestamp);
   return now.toDateString() !== lastReset.toDateString();
 }
+
+// ============================================================
+// Trailing Stop & Breakeven logika
+// ============================================================
+
+export interface TrailingState {
+  symbol: string;
+  direction: "BUY" | "SELL";
+  highWaterMark: number; // nejvyšší zisk od otevření
+  breakevenActivated: boolean; // SL posunut na breakeven
+  trailingActivated: boolean; // trailing stop aktivován
+  currentTrailingStop: number; // aktuální trailing SL cena
+}
+
+/**
+ * Vypočítá nový trailing stop na základě aktuální ceny
+ * - Breakeven: pokud zisk > 0.2%, posuň SL na entry cenu
+ * - Trailing: pokud zisk > 0.3%, posuň SL o trailingPercent pod high water mark
+ */
+export function calculateTrailingStop(
+  state: TrailingState,
+  currentPrice: number,
+  entryPrice: number,
+  trailingPercent: number = 0.2
+): TrailingState {
+  const updated = { ...state };
+
+  const pnlPercent = state.direction === "BUY"
+    ? ((currentPrice - entryPrice) / entryPrice) * 100
+    : ((entryPrice - currentPrice) / entryPrice) * 100;
+
+  // Update high water mark
+  if (state.direction === "BUY") {
+    updated.highWaterMark = Math.max(state.highWaterMark, currentPrice);
+  } else {
+    updated.highWaterMark = state.highWaterMark === 0
+      ? currentPrice
+      : Math.min(state.highWaterMark, currentPrice);
+  }
+
+  // Breakeven: pokud zisk > 0.2%, posuň SL na entry + malý buffer
+  if (pnlPercent > 0.2 && !state.breakevenActivated) {
+    updated.breakevenActivated = true;
+    const buffer = entryPrice * 0.02 / 100; // 0.02% buffer
+    updated.currentTrailingStop = state.direction === "BUY"
+      ? entryPrice + buffer
+      : entryPrice - buffer;
+  }
+
+  // Trailing: pokud zisk > 0.3%, trailing stop sleduje cenu
+  if (pnlPercent > 0.3) {
+    updated.trailingActivated = true;
+    const trailDistance = updated.highWaterMark * (trailingPercent / 100);
+
+    const newTrailingStop = state.direction === "BUY"
+      ? updated.highWaterMark - trailDistance
+      : updated.highWaterMark + trailDistance;
+
+    // Trailing stop se může jen posouvat ve směru profitu
+    if (state.direction === "BUY") {
+      updated.currentTrailingStop = Math.max(updated.currentTrailingStop, newTrailingStop);
+    } else {
+      updated.currentTrailingStop = updated.currentTrailingStop === 0
+        ? newTrailingStop
+        : Math.min(updated.currentTrailingStop, newTrailingStop);
+    }
+  }
+
+  return updated;
+}
+
+/**
+ * Zkontroluje, zda trailing stop byl zasažen
+ */
+export function isTrailingStopHit(state: TrailingState, currentPrice: number): boolean {
+  if (!state.breakevenActivated && !state.trailingActivated) return false;
+  if (state.currentTrailingStop === 0) return false;
+
+  if (state.direction === "BUY") {
+    return currentPrice <= state.currentTrailingStop;
+  } else {
+    return currentPrice >= state.currentTrailingStop;
+  }
+}

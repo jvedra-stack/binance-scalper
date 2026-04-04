@@ -81,3 +81,22 @@ export function getTodayPnL(): number {
     .filter((t) => t.status === "closed" && t.profit !== undefined)
     .reduce((sum, t) => sum + (t.profit || 0), 0);
 }
+
+// Generické key-value storage pro ML a další moduly
+export function loadServerData<T>(key: string): T | null {
+  const filePath = path.join(DATA_DIR, `${key}.json`);
+  try {
+    const data = fs.readFileSync(filePath, "utf-8");
+    return JSON.parse(data) as T;
+  } catch {
+    return null;
+  }
+}
+
+export function saveServerData(key: string, data: unknown): void {
+  ensureDataDir();
+  const filePath = path.join(DATA_DIR, `${key}.json`);
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
+  } catch { /* ok */ }
+}

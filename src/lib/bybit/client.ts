@@ -164,6 +164,7 @@ export class BybitClient {
         if (data.e === "kline" && data.k) {
           const k = data.k;
           const symbol = k.s;
+          const interval = k.i; // "1m", "5m", "15m", etc.
           const kline: Kline = {
             start: k.t,
             end: k.T,
@@ -175,7 +176,8 @@ export class BybitClient {
             turnover: parseFloat(k.q),
             symbol,
           };
-          const handlers = this.klineHandlers.get(symbol) || [];
+          const key = `${symbol}:${interval}`;
+          const handlers = this.klineHandlers.get(key) || [];
           handlers.forEach((h) => h(kline));
         }
       } catch {
@@ -353,6 +355,22 @@ export class BybitClient {
     }, true);
   }
 
+  // --- Funding Rate ---
+
+  async getFundingRate(symbol: string): Promise<{ fundingRate: string; fundingTime: number; markPrice: string }> {
+    const data = await this.request<{ fundingRate: string; fundingTime: number; markPrice: string }>(
+      "GET", "/fapi/v1/premiumIndex", { symbol }
+    );
+    return data;
+  }
+
+  async getAllFundingRates(): Promise<Array<{ symbol: string; fundingRate: string; fundingTime: number; markPrice: string }>> {
+    const data = await this.request<Array<{ symbol: string; fundingRate: string; fundingTime: number; markPrice: string }>>(
+      "GET", "/fapi/v1/premiumIndex"
+    );
+    return data;
+  }
+
   // --- Streaming subscriptions ---
 
   subscribeTicker(symbol: string, handler: TickerHandler): void {
@@ -372,8 +390,9 @@ export class BybitClient {
   }
 
   subscribeKline(symbol: string, interval: string, handler: KlineHandler): void {
-    if (!this.klineHandlers.has(symbol)) {
-      this.klineHandlers.set(symbol, []);
+    const key = `${symbol}:${interval === "1" ? "1m" : interval}`;
+    if (!this.klineHandlers.has(key)) {
+      this.klineHandlers.set(key, []);
       const stream = `${symbol.toLowerCase()}@kline_${interval === "1" ? "1m" : interval}`;
       this.subscriptions.push(stream);
       if (this.ws?.readyState === WebSocket.OPEN) {
@@ -384,7 +403,7 @@ export class BybitClient {
         }));
       }
     }
-    this.klineHandlers.get(symbol)!.push(handler);
+    this.klineHandlers.get(key)!.push(handler);
   }
 
   // --- Lifecycle ---

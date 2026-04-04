@@ -7,6 +7,8 @@ const links = [
   { href: "/", label: "Dashboard", icon: "📊" },
   { href: "/live", label: "Live", icon: "⚡" },
   { href: "/trades", label: "Obchody", icon: "📈" },
+  { href: "/backtest", label: "Backtest", icon: "🧪" },
+  { href: "/analytics", label: "Analytics", icon: "📉" },
   { href: "/settings", label: "Nastavení", icon: "⚙️" },
 ];
 

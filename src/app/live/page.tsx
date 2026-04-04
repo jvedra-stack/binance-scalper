@@ -1,9 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { useEngine } from "@/lib/hooks/useEngine";
+import CandlestickChart from "@/components/CandlestickChart";
 
 export default function LivePage() {
   const { state, config, closePosition } = useEngine();
+  const [chartSymbol, setChartSymbol] = useState<{ symbol: string; label: string } | null>(null);
 
   const isRunning = state.status === "running";
 
@@ -11,8 +14,17 @@ export default function LivePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Live View</h1>
-        <p className="text-sm text-[var(--muted)]">Real-time ceny, indikátory a signály</p>
+        <p className="text-sm text-[var(--muted)]">Real-time ceny, indikátory a signály — klikni na instrument pro graf</p>
       </div>
+
+      {/* Chart Modal */}
+      {chartSymbol && (
+        <CandlestickChart
+          symbol={chartSymbol.symbol}
+          label={chartSymbol.label}
+          onClose={() => setChartSymbol(null)}
+        />
+      )}
 
       {!isRunning && (
         <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-sm">
@@ -29,7 +41,8 @@ export default function LivePage() {
           return (
             <div
               key={instrument.symbol}
-              className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4"
+              className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 cursor-pointer hover:border-[var(--accent)] transition-colors"
+              onClick={() => setChartSymbol({ symbol: instrument.symbol, label: instrument.label })}
             >
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold">{instrument.label}</h3>
@@ -166,7 +179,7 @@ export default function LivePage() {
                       {livePnL >= 0 ? "+" : ""}{livePnL.toFixed(2)}
                     </span>
                     <button
-                      onClick={() => closePosition(trade.id)}
+                      onClick={() => closePosition(trade.symbol, trade.direction)}
                       className="px-3 py-1 rounded text-xs font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition"
                     >
                       Zavřít

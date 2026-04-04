@@ -101,8 +101,14 @@ export function useEngine() {
     updateConfig({ active: !config.active });
   }, [config.active, updateConfig]);
 
-  const closePosition = useCallback(async (_tradeId: string) => {
-    await fetch("/api/xtb/close-all", { method: "POST" });
+  const closePosition = useCallback(async (symbol: string, direction: "BUY" | "SELL") => {
+    try {
+      await fetch("/api/xtb/close-position", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, direction }),
+      });
+    } catch { /* ok */ }
   }, []);
 
   const closeAll = useCallback(async () => {

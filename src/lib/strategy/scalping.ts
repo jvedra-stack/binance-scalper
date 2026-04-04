@@ -221,7 +221,8 @@ export function generateSignal(
   symbol: string,
   candles: CandleRecord[],
   currentPrice: number,
-  config: StrategyConfig
+  config: StrategyConfig,
+  mtfCandles?: Record<string, CandleRecord[]>
 ): Signal {
   const indicators = computeIndicators(candles, config);
 
@@ -271,6 +272,46 @@ export function generateSignal(
     reasons.push("Trend filtr: downtrend → buy oslaben");
   } else if (trend !== "NEUTRAL") {
     reasons.push(`Trend: ${trend}`);
+  }
+
+  // MULTI-TIMEFRAME CONFLUENCE
+  // Pokud máme data z vyšších timeframů, ověříme shodu trendu
+  if (mtfCandles && Object.keys(mtfCandles).length > 0) {
+    let mtfBullish = 0;
+    let mtfBearish = 0;
+    let mtfTotal = 0;
+
+    for (const [tf, tfCandles] of Object.entries(mtfCandles)) {
+      const tfCloses = tfCandles.map((c) => c.close);
+      const tfTrend = getTrendDirection(tfCloses);
+      mtfTotal++;
+      if (tfTrend === "UP") {
+        mtfBullish++;
+        reasons.push(`MTF ${tf}: uptrend`);
+      } else if (tfTrend === "DOWN") {
+        mtfBearish++;
+        reasons.push(`MTF ${tf}: downtrend`);
+      } else {
+        reasons.push(`MTF ${tf}: neutral`);
+      }
+    }
+
+    // Shoda všech timeframů → confidence boost
+    if (mtfTotal >= 2) {
+      if (mtfBullish === mtfTotal && totalBuy > totalSell) {
+        totalBuy += 0.15;
+        reasons.push("MTF confluence: všechny TF bullish → +15% confidence");
+      } else if (mtfBearish === mtfTotal && totalSell > totalBuy) {
+        totalSell += 0.15;
+        reasons.push("MTF confluence: všechny TF bearish → +15% confidence");
+      } else if (mtfBullish === mtfTotal && totalSell > totalBuy) {
+        totalSell *= 0.6; // proti MTF trendu → oslabení
+        reasons.push("MTF filtr: sell proti bullish MTF → oslaben");
+      } else if (mtfBearish === mtfTotal && totalBuy > totalSell) {
+        totalBuy *= 0.6;
+        reasons.push("MTF filtr: buy proti bearish MTF → oslaben");
+      }
+    }
   }
 
   // Vyhodnocení

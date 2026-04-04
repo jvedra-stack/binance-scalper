@@ -2,9 +2,10 @@
 
 import { useEngine } from "@/lib/hooks/useEngine";
 import StatusBadge from "@/components/StatusBadge";
+import CorrelationMatrix from "@/components/CorrelationMatrix";
 
 export default function Dashboard() {
-  const { state, config, start, stop, toggleBot, closeAll, hydrated, hasCredentials } = useEngine();
+  const { state, config, start, stop, toggleBot, closeAll, closePosition, hydrated, hasCredentials } = useEngine();
 
   const isRunning = state.status === "running";
 
@@ -123,6 +124,7 @@ export default function Dashboard() {
                   <th className="px-4 py-2">SL</th>
                   <th className="px-4 py-2">TP</th>
                   <th className="px-4 py-2">P&L</th>
+                  <th className="px-4 py-2">Akce</th>
                 </tr>
               </thead>
               <tbody>
@@ -149,6 +151,14 @@ export default function Dashboard() {
                     }}>
                       {(trade.profit || 0) >= 0 ? "+" : ""}{(trade.profit || 0).toFixed(2)}
                     </td>
+                    <td className="px-4 py-2">
+                      <button
+                        onClick={() => closePosition(trade.symbol, trade.direction)}
+                        className="px-3 py-1 rounded text-xs font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition"
+                      >
+                        Zavrit
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -156,6 +166,9 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Korelační matice */}
+      {isRunning && <CorrelationMatrix />}
 
       {/* Signály */}
       <div className="rounded-xl border border-[var(--card-border)] bg-[var(--card)] overflow-hidden">
