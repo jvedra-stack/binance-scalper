@@ -605,9 +605,32 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
     }
   }
 
-  // Dynamický position sizing
+  // Dynamický position sizing (instrument.volume je v USDT)
   const recentTrades = getTrades().slice(-10).map((t) => ({ profit: t.profit || 0 }));
-  const adjustedVolume = dynamicPositionSize(instrument.volume, recentTrades);
+  const adjustedVolumeUSDT = dynamicPositionSize(instrument.volume, recentTrades);
+
+  // Přepočet USDT → coiny (qty pro Binance musí být v coinech)
+  const qtyInCoins = adjustedVolumeUSDT / currentPrice;
+
+  // Zjisti precision pro qty a price
+  let qtyPrecision = 3;
+  let pricePrecision = 2;
+  let minQty = 0.001;
+  try {
+    const instrumentsData = await client.getInstruments();
+    const info = instrumentsData.list.find((i) => i.symbol === instrument.symbol);
+    if (info) {
+      const step = parseFloat(info.lotSizeFilter.qtyStep);
+      qtyPrecision = step < 1 ? Math.ceil(-Math.log10(step)) : 0;
+      minQty = parseFloat(info.lotSizeFilter.minOrderQty);
+      const tick = parseFloat(info.priceFilter.tickSize);
+      pricePrecision = tick < 1 ? Math.ceil(-Math.log10(tick)) : 0;
+    }
+  } catch { /* použij default */ }
+
+  // Zaokrouhli qty na správný step a ověř minimum
+  const stepSize = Math.pow(10, -qtyPrecision);
+  const adjustedQty = Math.max(minQty, parseFloat((Math.floor(qtyInCoins / stepSize) * stepSize).toFixed(qtyPrecision)));
 
   // Garantovaný SL/TP
   const { sl, tp } = calculateSLTP(signal, instrument, signal.indicators.atr);
@@ -617,9 +640,9 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
       symbol: instrument.symbol,
       side: signal.type === "BUY" ? "Buy" : "Sell",
       orderType: "Market",
-      qty: adjustedVolume.toFixed(0),
-      stopLoss: sl.toFixed(2),
-      takeProfit: tp.toFixed(2),
+      qty: adjustedQty.toFixed(qtyPrecision),
+      stopLoss: sl.toFixed(pricePrecision),
+      takeProfit: tp.toFixed(pricePrecision),
     });
 
     const trade: Trade = {
@@ -627,7 +650,7 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
       orderId: result.orderId,
       symbol: signal.symbol,
       direction: signal.type as "BUY" | "SELL",
-      volume: adjustedVolume,
+      volume: adjustedQty,
       openPrice: signal.price,
       openTime: Date.now(),
       sl, tp,
@@ -636,7 +659,7 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
     };
 
     saveTrade(trade);
-    console.log(`[TRADE] ${signal.type} ${instrument.symbol} @ ${signal.price} | Vol: ${adjustedVolume} | SL: ${sl.toFixed(2)} TP: ${tp.toFixed(2)} | Conf: ${(signal.confidence * 100).toFixed(0)}%`);
+    console.log(`[TRADE] ${signal.type} ${instrument.symbol} @ ${signal.price} | Qty: ${adjustedQty} (${adjustedVolumeUSDT.toFixed(0)} USDT) | SL: ${sl.toFixed(pricePrecision)} TP: ${tp.toFixed(pricePrecision)} | Conf: ${(signal.confidence * 100).toFixed(0)}%`);
     notifyTradeOpen(trade).catch(() => {});
 
     setState({
