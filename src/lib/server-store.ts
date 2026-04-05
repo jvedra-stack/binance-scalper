@@ -65,7 +65,13 @@ export function saveServerTrades(trades: Trade[]): void {
 
 export function addServerTrade(trade: Trade): void {
   const trades = loadServerTrades();
-  trades.push(trade);
+  // Deduplikace — pokud trade se stejným ID už existuje, updatuj ho místo přidání
+  const existingIdx = trades.findIndex((t) => t.id === trade.id);
+  if (existingIdx >= 0) {
+    trades[existingIdx] = trade;
+  } else {
+    trades.push(trade);
+  }
   saveServerTrades(trades);
 }
 

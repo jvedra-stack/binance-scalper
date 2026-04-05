@@ -234,8 +234,7 @@ function calculateRisk(balance: number): RiskConfig {
 }
 
 function calculateVolume(symbol: string, balance: number): number {
-  // Max 5% účtu na trade
+  // Max 5% účtu na trade, minimum 20 USDT
   const tradeSize = balance * 0.05;
-  // V USDT pro linear futures
-  return Math.max(5, Math.round(tradeSize));
+  return Math.max(20, Math.round(tradeSize));
 }
