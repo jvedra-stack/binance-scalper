@@ -196,9 +196,9 @@ export interface EngineState {
 // --- Defaultní konfigurace ---
 
 export const DEFAULT_INSTRUMENTS: InstrumentConfig[] = [
-  { symbol: "BTCUSDT", label: "Bitcoin", enabled: true, volume: 1000, slPercent: 0.4, tpPercent: 0.8 },
-  { symbol: "ETHUSDT", label: "Ethereum", enabled: true, volume: 1000, slPercent: 0.4, tpPercent: 0.8 },
-  { symbol: "SOLUSDT", label: "Solana", enabled: true, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
+  { symbol: "BTCUSDT", label: "Bitcoin", enabled: true, volume: 3000, slPercent: 0.4, tpPercent: 0.8 },
+  { symbol: "ETHUSDT", label: "Ethereum", enabled: true, volume: 3000, slPercent: 0.4, tpPercent: 0.8 },
+  { symbol: "SOLUSDT", label: "Solana", enabled: true, volume: 3000, slPercent: 0.5, tpPercent: 0.9 },
   { symbol: "DOGEUSDT", label: "Doge", enabled: false, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
   { symbol: "PEPEUSDT", label: "Pepe", enabled: false, volume: 1000, slPercent: 0.6, tpPercent: 1.0 },
   { symbol: "XRPUSDT", label: "XRP", enabled: false, volume: 1000, slPercent: 0.4, tpPercent: 0.8 },
