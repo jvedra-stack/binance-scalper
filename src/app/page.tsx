@@ -200,6 +200,11 @@ export default function Dashboard() {
                     </span>
                   </div>
                 </div>
+                {signal.blocked && (
+                  <div className="text-xs px-2 py-1 mb-1 rounded bg-yellow-500/10 text-yellow-400">
+                    ⚠ Blokováno: {signal.blocked}
+                  </div>
+                )}
                 <div className="text-xs text-[var(--muted)] space-y-0.5">
                   {signal.reasons.map((r, i) => (
                     <div key={i}>• {r}</div>

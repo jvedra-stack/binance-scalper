@@ -791,10 +791,26 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
   const signals = [...state.signals.filter((s) => s.symbol !== instrument.symbol), signal];
   setState({ signals });
 
-  if (signal.type === "HOLD") return;
+  if (signal.type === "HOLD") {
+    console.log(`[SIGNAL] ${instrument.symbol} HOLD (conf: ${(signal.confidence * 100).toFixed(0)}%)`);
+    return;
+  }
+
+  console.log(`[SIGNAL] ${instrument.symbol} ${signal.type} conf: ${(signal.confidence * 100).toFixed(0)}%`);
+
+  // Helper: zablokuj signál a aktualizuj v UI
+  const blockSignal = (reason: string) => {
+    signal.blocked = reason;
+    const updatedSignals = [...getState().signals.filter((s) => s.symbol !== instrument.symbol), signal];
+    setState({ signals: updatedSignals });
+    console.log(`[BLOCKED] ${instrument.symbol} ${signal.type}: ${reason}`);
+  };
 
   const riskCheck = checkRisk(signal, state.openPositions, state.todayTrades, state.todayPnL, config.risk);
-  if (!riskCheck.allowed) return;
+  if (!riskCheck.allowed) {
+    blockSignal(riskCheck.reason || "Risk check failed");
+    return;
+  }
 
   // ML predikce — uprav confidence na základě historické úspěšnosti
   const mlPrediction = predictWinProbability(
@@ -821,7 +837,7 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
       0.7
     );
     if (!corrCheck.allowed) {
-      console.log(`[CORR FILTER] ${corrCheck.reason}`);
+      blockSignal(corrCheck.reason || "Korelační filtr");
       return;
     }
   }
@@ -829,9 +845,12 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
   // Fee-aware EV filtr — trade se vyplatí jen pokud expected value > 0
   const evCheck = isTradeWorthIt(signal.confidence, instrument.slPercent, instrument.tpPercent);
   if (!evCheck.worthIt) {
-    console.log(`[EV FILTER] ${instrument.symbol} ${signal.type} EV=${evCheck.expectedValue.toFixed(3)}% → nevyplatí se`);
+    blockSignal(`EV=${evCheck.expectedValue.toFixed(3)}% → nevyplatí se po fees`);
     return;
   }
+
+  // Clear blocked flag — trade projde všemi filtry
+  signal.blocked = undefined;
 
   // Dynamický position sizing (instrument.volume je v USDT)
   const recentTrades = getTrades().slice(-10).map((t) => ({ profit: t.profit || 0 }));

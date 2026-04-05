@@ -115,6 +115,7 @@ export interface Signal {
   confidence: number; // 0-1
   reasons: string[];
   indicators: IndicatorValues;
+  blocked?: string; // důvod proč se trade neexekuoval (pro UI)
 }
 
 // --- Obchody ---
