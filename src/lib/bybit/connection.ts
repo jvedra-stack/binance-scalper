@@ -269,10 +269,10 @@ export async function startEngine(config: BotConfig): Promise<void> {
 
     const enabled = config.instruments.filter((i) => i.enabled);
 
-    // Nastav leverage 20x na všech instrumentech
+    // Nastav leverage 50x na všech instrumentech
     for (const inst of enabled) {
       try {
-        await client.setLeverage(inst.symbol, "20");
+        await client.setLeverage(inst.symbol, "50");
         console.log(`[LEVERAGE] ${inst.symbol} nastaven na 20x`);
       } catch { /* může selhat pokud už je nastavený */ }
     }
