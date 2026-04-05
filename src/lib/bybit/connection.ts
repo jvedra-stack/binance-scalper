@@ -440,7 +440,8 @@ async function periodicCheck(): Promise<void> {
 
     // ML: přetrénuj model každých ~5 minut (každý 37. check)
     if (checkCount % 37 === 0) {
-      try { trainModel(); } catch { /* ok */ }
+      // ML training dočasně vypnuto — čeká na nová data s novým R:R
+      // try { trainModel(); } catch { /* ok */ }
     }
 
     try {
@@ -812,20 +813,13 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
     return;
   }
 
-  // ML predikce — uprav confidence na základě historické úspěšnosti
-  const mlPrediction = predictWinProbability(
-    signal.indicators, signal.price, signal.confidence, signal.type as "BUY" | "SELL"
-  );
-  if (mlPrediction !== null) {
-    signal.reasons.push(`ML predikce: ${(mlPrediction * 100).toFixed(0)}% šance na výhru`);
-    if (mlPrediction < 0.35) {
-      signal.confidence *= 0.7; // ML říká nízká šance → oslabení
-      signal.reasons.push("ML filtr: nízká predikce → confidence snížena");
-    } else if (mlPrediction > 0.65) {
-      signal.confidence = Math.min(1, signal.confidence * 1.15); // ML říká vysoká šance → posílení
-      signal.reasons.push("ML boost: vysoká predikce → confidence zvýšena");
-    }
-  }
+  // ML predikce — DOČASNĚ VYPNUTO
+  // Model je natrénovaný na starých datech se špatným R:R, blokuje všechny obchody.
+  // Znovu zapnout až se nasbírá 50+ obchodů s novým nastavením.
+  // const mlPrediction = predictWinProbability(
+  //   signal.indicators, signal.price, signal.confidence, signal.type as "BUY" | "SELL"
+  // );
+  // if (mlPrediction !== null) { ... }
 
   // Aktualizuj signál v UI s finální confidence (po ML filtraci)
   const updatedSignals2 = [...getState().signals.filter((s) => s.symbol !== instrument.symbol), signal];

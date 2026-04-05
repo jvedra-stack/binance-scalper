@@ -181,7 +181,7 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="divide-y divide-[var(--card-border)]">
-            {state.signals.map((signal) => (
+            {state.signals.filter((signal) => config.instruments.some((i) => i.symbol === signal.symbol && i.enabled)).map((signal) => (
               <div key={signal.symbol} className="px-4 py-3">
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-medium">{signal.symbol}</span>

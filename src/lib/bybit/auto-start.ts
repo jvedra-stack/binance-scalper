@@ -4,7 +4,7 @@
 // ============================================================
 
 import { startEngine, getEngineState } from "./connection";
-import { loadServerConfig } from "@/lib/server-store";
+import { loadServerConfig, saveServerConfig } from "@/lib/server-store";
 import type { BotConfig } from "@/types";
 import { DEFAULT_INSTRUMENTS, DEFAULT_STRATEGY, DEFAULT_RISK } from "@/types";
 
@@ -22,19 +22,21 @@ export async function autoStartBot(): Promise<void> {
 
   console.log("[AUTO-START] Nalezeny Binance credentials, startuji bota...");
 
-  // Načti uloženou konfiguraci nebo použij defaulty
+  // Načti uloženou konfiguraci — DEFAULT_CONFIG se použije jako základ
   const savedConfig = loadServerConfig();
   const config: BotConfig = {
+    ...savedConfig,
     credentials: {
       apiKey,
       apiSecret,
       testnet: process.env.BINANCE_TESTNET === "true",
     },
-    instruments: savedConfig.instruments?.length > 0 ? savedConfig.instruments : DEFAULT_INSTRUMENTS,
-    strategy: savedConfig.strategy || DEFAULT_STRATEGY,
-    risk: savedConfig.risk || DEFAULT_RISK,
     active: true, // automaticky aktivní
   };
+
+  // Ulož config na disk — zajistí že data/config.json existuje
+  saveServerConfig(config);
+  console.log(`[AUTO-START] Config: ${config.instruments.filter(i => i.enabled).map(i => i.symbol).join(", ")} | minConf: ${config.strategy.minConfidence} | volume: ${config.instruments[0]?.volume}`);
 
   try {
     await startEngine(config);
