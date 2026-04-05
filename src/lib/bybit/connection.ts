@@ -273,7 +273,7 @@ export async function startEngine(config: BotConfig): Promise<void> {
     for (const inst of enabled) {
       try {
         await client.setLeverage(inst.symbol, "50");
-        console.log(`[LEVERAGE] ${inst.symbol} nastaven na 20x`);
+        console.log(`[LEVERAGE] ${inst.symbol} nastaven na 50x`);
       } catch { /* může selhat pokud už je nastavený */ }
     }
 
