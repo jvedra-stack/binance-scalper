@@ -21,7 +21,7 @@ interface CandleRecord {
   ctmString: string;
 }
 
-import { ema, sma, rsi, bollingerBands, atr, stochRsi } from "./indicators";
+import { ema, rsi, bollingerBands, atr, stochRsi } from "./indicators";
 
 function extractData(candles: CandleRecord[]) {
   return {
@@ -45,6 +45,7 @@ export function computeIndicators(
   const rsiArr = rsi(closes, config.rsiPeriod);
   const bb = bollingerBands(closes, config.bbPeriod, config.bbStdDev);
   const atrArr = atr(highs, lows, closes, config.atrPeriod);
+  const stochRsiArr = stochRsi(closes, config.rsiPeriod, 14);
 
   if (!emaFastArr.length || !emaSlowArr.length || !rsiArr.length || !bb.upper.length || !atrArr.length) {
     return null;
@@ -58,6 +59,7 @@ export function computeIndicators(
     bbLower: bb.lower[bb.lower.length - 1],
     atr: atrArr[atrArr.length - 1],
     volume: volumes[volumes.length - 1],
+    stochRsi: stochRsiArr.length > 0 ? stochRsiArr[stochRsiArr.length - 1] : 50,
     timestamp: Date.now(),
   };
 }
@@ -189,6 +191,21 @@ function momentumScore(indicators: IndicatorValues, config: StrategyConfig, clos
     reasons.push(`RSI ${indicators.rsi.toFixed(1)} vysoké`);
   }
 
+  // Stochastic RSI — přesnější oversold/overbought signály
+  if (indicators.stochRsi < 15) {
+    buy += 0.2;
+    reasons.push(`StochRSI ${indicators.stochRsi.toFixed(0)} extrémně přeprodáno`);
+  } else if (indicators.stochRsi < 25) {
+    buy += 0.1;
+    reasons.push(`StochRSI ${indicators.stochRsi.toFixed(0)} přeprodáno`);
+  } else if (indicators.stochRsi > 85) {
+    sell += 0.2;
+    reasons.push(`StochRSI ${indicators.stochRsi.toFixed(0)} extrémně překoupeno`);
+  } else if (indicators.stochRsi > 75) {
+    sell += 0.1;
+    reasons.push(`StochRSI ${indicators.stochRsi.toFixed(0)} překoupeno`);
+  }
+
   // Price momentum — posledních 5 svíček
   if (closes.length >= 5) {
     const recentChange = ((closes[closes.length - 1] - closes[closes.length - 5]) / closes[closes.length - 5]) * 100;
@@ -230,7 +247,7 @@ export function generateSignal(
     return {
       type: "HOLD", symbol, price: currentPrice, timestamp: Date.now(),
       confidence: 0, reasons: ["Nedostatek dat"],
-      indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, timestamp: Date.now() },
+      indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, timestamp: Date.now() },
     };
   }
 
@@ -251,6 +268,18 @@ export function generateSignal(
     totalBuy += s.buy;
     totalSell += s.sell;
     reasons.push(...s.reasons);
+  }
+
+  // Volume filtr — neobchoduj při nízkém volume
+  if (candles.length >= 20) {
+    const recentVols = candles.slice(-5).map((c) => c.vol);
+    const avgVol20 = candles.slice(-20).reduce((s, c) => s + c.vol, 0) / 20;
+    const recentAvgVol = recentVols.reduce((a, b) => a + b, 0) / recentVols.length;
+    if (avgVol20 > 0 && recentAvgVol < avgVol20 * 0.5) {
+      totalBuy *= 0.7;
+      totalSell *= 0.7;
+      reasons.push(`Low volume: ${(recentAvgVol / avgVol20 * 100).toFixed(0)}% průměru → confidence -30%`);
+    }
   }
 
   // ATR volatilita bonus

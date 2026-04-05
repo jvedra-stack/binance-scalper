@@ -6,7 +6,7 @@
 import { BybitClient } from "./client";
 import { generateSignal, dynamicPositionSize } from "@/lib/strategy/scalping";
 import { checkRisk, calculateSLTP, calculateTrailingStop, isTrailingStopHit, type TrailingState } from "@/lib/risk/manager";
-import { loadServerTrades, saveServerTrades, addServerTrade } from "@/lib/server-store";
+import { loadServerTrades, saveServerTrades, addServerTrade, getTodayPnL } from "@/lib/server-store";
 import { computeCorrelationMatrix, checkCorrelationRisk, type CorrelationMatrix } from "@/lib/strategy/correlation";
 import { analyzeFundingRate, type FundingRateData, type FundingSignal } from "@/lib/strategy/funding";
 import { extractFeatures, logTradeFeatures, trainModel, predictWinProbability, loadModel, type MLModel } from "@/lib/ml/model";
@@ -112,6 +112,38 @@ function saveTrade(trade: Trade): void {
   }
 }
 
+/**
+ * Zavře existující trade záznam — najde původní "open" trade a aktualizuje ho.
+ * Pokud nenajde, uloží nový záznam.
+ */
+function closeTradeRecord(pos: Trade, closePrice: number, profit: number): void {
+  const trades = loadServerTrades();
+  // Najdi původní otevřený záznam (trade_* id, ne pos_*)
+  const openIdx = trades.findIndex(
+    (t) => t.status === "open" && t.symbol === pos.symbol && t.direction === pos.direction
+  );
+  if (openIdx >= 0) {
+    trades[openIdx] = {
+      ...trades[openIdx],
+      status: "closed",
+      closeTime: Date.now(),
+      closePrice,
+      profit,
+    };
+    saveServerTrades(trades);
+    // ML logging
+    const closed = trades[openIdx];
+    if (closed.signal && closed.signal.indicators.emaFast > 0) {
+      try {
+        const features = extractFeatures(closed.signal.indicators, closed.signal.price, closed.signal.confidence, closed.direction);
+        logTradeFeatures({ ...features, won: profit > 0 });
+      } catch { /* ok */ }
+    }
+  } else {
+    saveTrade({ ...pos, status: "closed", closeTime: Date.now(), closePrice, profit });
+  }
+}
+
 // --- Public API ---
 
 export function addSSEListener(listener: (event: string, data: unknown) => void): () => void {
@@ -142,7 +174,8 @@ export async function closeSinglePosition(symbol: string, direction: "BUY" | "SE
 
   try {
     await client.closePosition(symbol, direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
-    saveTrade({ ...pos, status: "closed", closeTime: Date.now(), profit: pos.profit || 0 });
+    const tick = getState().lastTick?.[symbol];
+    closeTradeRecord(pos, tick?.lastPrice || pos.openPrice, pos.profit || 0);
     console.log(`[CLOSE SINGLE] ${symbol} ${direction} P&L: ${pos.profit?.toFixed(2)}`);
     setState({
       openPositions: getState().openPositions.filter(
@@ -161,7 +194,8 @@ export async function closeAllPositions(): Promise<void> {
   for (const pos of getState().openPositions) {
     try {
       await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
-      saveTrade({ ...pos, status: "closed", closeTime: Date.now(), profit: pos.profit || 0 });
+      const tick = getState().lastTick?.[pos.symbol];
+      closeTradeRecord(pos, tick?.lastPrice || pos.openPrice, pos.profit || 0);
       console.log(`[CLOSE] ${pos.symbol} ${pos.direction} P&L: ${pos.profit?.toFixed(2)}`);
     } catch (err) {
       console.error(`[CLOSE] Chyba: ${err instanceof Error ? err.message : err}`);
@@ -267,7 +301,7 @@ export async function startEngine(config: BotConfig): Promise<void> {
             type: (p.side === "Buy" ? "BUY" : "SELL") as "BUY" | "SELL",
             symbol: p.symbol, price: parseFloat(p.avgPrice), timestamp: Date.now(),
             confidence: 0, reasons: ["Sync z Binance"],
-            indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, timestamp: Date.now() },
+            indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, timestamp: Date.now() },
           },
         }));
       setState({ openPositions });
@@ -452,13 +486,17 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
           type: (p.side === "Buy" ? "BUY" : "SELL") as "BUY" | "SELL",
           symbol: p.symbol, price: parseFloat(p.avgPrice), timestamp: Date.now(),
           confidence: 0, reasons: ["Sync"],
-          indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, timestamp: Date.now() },
+          indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, timestamp: Date.now() },
         },
       }));
 
     // Trailing stop tracking
     if (!globalState.__bybit_trailing) globalState.__bybit_trailing = new Map();
     const trailingMap = globalState.__bybit_trailing;
+
+    // Partial TP tracking — pozice kde už se zavřela polovina
+    if (!globalState.__bybit_partialTP) globalState.__bybit_partialTP = new Set<string>();
+    const partialTPSet = globalState.__bybit_partialTP as Set<string>;
 
     for (const pos of openPositions) {
       const posValue = pos.openPrice * pos.volume;
@@ -488,7 +526,7 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
           console.log(`[TRAILING SL] ${pos.symbol} ${pos.direction} @ ${currentPrice.toFixed(2)} (trail: ${trailState.currentTrailingStop.toFixed(2)})`);
           try {
             await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
-            saveTrade({ ...pos, status: "closed", closeTime: Date.now(), profit: pos.profit || 0 });
+            closeTradeRecord(pos, currentPrice, pos.profit || 0);
             trailingMap.delete(trailKey);
           } catch (err) {
             console.error(`[TRAILING SL] Chyba: ${err instanceof Error ? err.message : err}`);
@@ -497,24 +535,40 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
         }
       }
 
-      // Server-side SL: zavři pozice s > 0.8% ztrátou (agresivnější SL)
-      if ((pos.profit || 0) < 0 && lossPercent > 0.8) {
+      // Server-side SL: zavři pozice s > 0.6% ztrátou
+      if ((pos.profit || 0) < 0 && lossPercent > 0.6) {
         console.log(`[SL] Zavírám ${pos.symbol} ${pos.direction} — ztráta ${pos.profit?.toFixed(2)} (${lossPercent.toFixed(1)}%)`);
         try {
           await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
-          saveTrade({ ...pos, status: "closed", closeTime: Date.now(), profit: pos.profit || 0 });
+          closeTradeRecord(pos, currentPrice, pos.profit || 0);
           trailingMap.delete(trailKey);
         } catch (err) {
           console.error(`[SL] Chyba: ${err instanceof Error ? err.message : err}`);
         }
       }
-      // Server-side TP: zavři pozice s > 0.5% ziskem (pokud trailing neběží)
-      if (!trailState.trailingActivated && (pos.profit || 0) > 0 && lossPercent > 0.5) {
+      // Partial TP: na 0.5% zisku zavři 50% pozice, zbytek nech na trailing
+      const partialKey = `${pos.symbol}_${pos.direction}`;
+      if ((pos.profit || 0) > 0 && lossPercent > 0.5 && !partialTPSet.has(partialKey)) {
+        const halfQty = (pos.volume / 2);
+        if (halfQty > 0) {
+          console.log(`[PARTIAL TP] ${pos.symbol} ${pos.direction} — zavírám 50% @ ${currentPrice.toFixed(2)} (zisk ${lossPercent.toFixed(1)}%)`);
+          try {
+            await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", halfQty.toString());
+            partialTPSet.add(partialKey);
+          } catch (err) {
+            console.error(`[PARTIAL TP] Chyba: ${err instanceof Error ? err.message : err}`);
+          }
+        }
+      }
+
+      // Server-side TP: zavři pozice s > 1.0% ziskem (pokud trailing neběží)
+      if (!trailState.trailingActivated && (pos.profit || 0) > 0 && lossPercent > 1.0) {
         console.log(`[TP] Zavírám ${pos.symbol} ${pos.direction} — zisk ${pos.profit?.toFixed(2)} (${lossPercent.toFixed(1)}%)`);
         try {
           await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
-          saveTrade({ ...pos, status: "closed", closeTime: Date.now(), profit: pos.profit || 0 });
+          closeTradeRecord(pos, currentPrice, pos.profit || 0);
           trailingMap.delete(trailKey);
+          partialTPSet.delete(partialKey);
         } catch (err) {
           console.error(`[TP] Chyba: ${err instanceof Error ? err.message : err}`);
         }
@@ -526,10 +580,10 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
     for (const prev of prevPositions) {
       const stillOpen = openPositions.find((p) => p.symbol === prev.symbol && p.direction === prev.direction);
       if (!stillOpen) {
-        const closedTrade = { ...prev, status: "closed" as const, closeTime: Date.now(), closePrice: 0, profit: prev.profit || 0 };
-        saveTrade(closedTrade);
+        const tick = getState().lastTick?.[prev.symbol];
+        closeTradeRecord(prev, tick?.lastPrice || prev.openPrice, prev.profit || 0);
         console.log(`[CLOSED] ${prev.symbol} ${prev.direction} P&L: ${prev.profit?.toFixed(2)}`);
-        notifyTradeClose(closedTrade).catch(() => {});
+        notifyTradeClose({ ...prev, status: "closed", closeTime: Date.now(), profit: prev.profit || 0 }).catch(() => {});
       }
     }
 
@@ -550,11 +604,13 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
           type: (p.side === "Buy" ? "BUY" : "SELL") as "BUY" | "SELL",
           symbol: p.symbol, price: parseFloat(p.avgPrice), timestamp: Date.now(),
           confidence: 0, reasons: ["Sync"],
-          indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, timestamp: Date.now() },
+          indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, timestamp: Date.now() },
         },
       }));
 
-    const todayPnL = freshPositions.reduce((sum, p) => sum + (p.profit || 0), 0);
+    const unrealizedPnL = freshPositions.reduce((sum, p) => sum + (p.profit || 0), 0);
+    const realizedPnL = getTodayPnL();
+    const todayPnL = unrealizedPnL + realizedPnL;
     setState({ openPositions: freshPositions, todayPnL });
 
     // Kill switch
@@ -563,7 +619,7 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
       for (const pos of freshPositions) {
         try {
           await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
-          saveTrade({ ...pos, status: "closed", closeTime: Date.now(), profit: pos.profit || 0 });
+          closeTradeRecord(pos, pos.openPrice, pos.profit || 0);
         } catch { /* ok */ }
       }
       setState({ status: "killed", error: `Kill switch: ztráta ${todayPnL.toFixed(2)} USDT` });
@@ -584,6 +640,15 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
   if (!lastTick) return;
 
   const currentPrice = lastTick.lastPrice;
+
+  // Spread filtr — neobchoduj při vysokém spreadu (> 0.05%)
+  if (lastTick.ask1Price > 0 && lastTick.bid1Price > 0) {
+    const spreadPercent = ((lastTick.ask1Price - lastTick.bid1Price) / currentPrice) * 100;
+    if (spreadPercent > 0.05) {
+      return; // spread příliš vysoký
+    }
+  }
+
   const candles = klines.map(klineToCandle);
 
   // Multi-timeframe data

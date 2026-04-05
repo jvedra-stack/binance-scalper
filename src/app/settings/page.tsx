@@ -238,7 +238,6 @@ export default function SettingsPage() {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <Input label="Max otevřených pozic" type="number" value={config.risk.maxOpenPositions.toString()} onChange={(v) => updateConfig({ risk: { ...config.risk, maxOpenPositions: parseInt(v) || 2 } })} />
           <Input label="Max denní ztráta (USDT)" type="number" value={config.risk.maxDailyLoss.toString()} onChange={(v) => updateConfig({ risk: { ...config.risk, maxDailyLoss: parseFloat(v) || 50 } })} />
-          <Input label="Max denních tradů" type="number" value={config.risk.maxDailyTrades.toString()} onChange={(v) => updateConfig({ risk: { ...config.risk, maxDailyTrades: parseInt(v) || 20 } })} />
         </div>
         <div className="mt-3">
           <label className="flex items-center gap-2 text-sm cursor-pointer">

@@ -227,7 +227,6 @@ function calculateRisk(balance: number): RiskConfig {
   return {
     maxOpenPositions: balance > 5000 ? 3 : 2,
     maxDailyLoss: Math.max(Math.round(balance * 0.02), 10),
-    maxDailyTrades: 20,
     trailingStop: true,
     trailingStopPercent: 0.2,
   };
