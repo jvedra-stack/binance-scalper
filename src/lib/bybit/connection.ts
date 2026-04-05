@@ -188,8 +188,34 @@ export async function startEngine(config: BotConfig): Promise<void> {
     globalState.__bybit_client = client;
 
     client.setDisconnectHandler(() => {
-      setState({ status: "error", error: "Odpojeno od Binance" });
-      stopEngine();
+      console.log("[WS] Odpojeno od Binance — pokus o reconnect za 5s...");
+      setState({ status: "connecting", error: "Odpojeno — reconnecting..." });
+      // Auto-reconnect po 5s
+      setTimeout(async () => {
+        try {
+          const currentConfig = getConfig();
+          if (currentConfig && getState().status !== "stopped") {
+            console.log("[WS] Reconnecting...");
+            await startEngine(currentConfig);
+            console.log("[WS] Reconnect úspěšný!");
+          }
+        } catch (err) {
+          console.error(`[WS] Reconnect selhal: ${err instanceof Error ? err.message : err}`);
+          setState({ status: "error", error: `Reconnect selhal: ${err instanceof Error ? err.message : err}` });
+          // Zkus znovu za 30s
+          setTimeout(async () => {
+            try {
+              const cfg = getConfig();
+              if (cfg && getState().status !== "stopped" && getState().status !== "running") {
+                console.log("[WS] Druhý pokus o reconnect...");
+                await startEngine(cfg);
+              }
+            } catch {
+              setState({ status: "error", error: "Reconnect selhal opakovaně — restartuj ručně" });
+            }
+          }, 30000);
+        }
+      }, 5000);
     });
 
     const enabled = config.instruments.filter((i) => i.enabled);
