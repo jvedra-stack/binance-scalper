@@ -56,7 +56,7 @@ export function checkRisk(
  * Spočítá jestli se trade matematicky vyplatí po odečtení poplatků
  * EV = (confidence × tpPercent) - ((1 - confidence) × slPercent) - feePercent
  */
-const ROUND_TRIP_FEE_PERCENT = 0.1; // 0.04% maker + 0.06% taker × 2 strany
+const ROUND_TRIP_FEE_PERCENT = 0.07; // 0.02% maker + 0.05% taker (Binance Futures base tier)
 
 export function isTradeWorthIt(
   confidence: number,

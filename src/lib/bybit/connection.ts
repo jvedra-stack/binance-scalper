@@ -827,6 +827,10 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
     }
   }
 
+  // Aktualizuj signál v UI s finální confidence (po ML filtraci)
+  const updatedSignals2 = [...getState().signals.filter((s) => s.symbol !== instrument.symbol), signal];
+  setState({ signals: updatedSignals2 });
+
   // Korelační filtr — blokuj duplicitní expozice na korelovaných coinech
   if (globalState.__bybit_correlation) {
     const corrCheck = checkCorrelationRisk(
