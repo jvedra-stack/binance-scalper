@@ -9,13 +9,12 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // POST /api/xtb/optimize
-// Spustí grid search přes kombinace SL/TP parametrů
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const {
     symbol = "BTCUSDT",
     interval = "5m",
-    limit = 500,
+    limit = 300,
   } = body as { symbol?: string; interval?: string; limit?: number };
 
   let client = getClient();
@@ -32,7 +31,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await client.getKlines(symbol, interval, Math.min(limit, 1500));
+    const result = await client.getKlines(symbol, interval, Math.min(limit, 500));
     const klines: BybitKline[] = (result.list || []).map((k: string[]) => ({
       start: parseInt(k[0]), end: parseInt(k[0]) + 60000,
       open: parseFloat(k[1]), high: parseFloat(k[2]),
@@ -44,10 +43,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Nedostatek dat" }, { status: 400 });
     }
 
-    // Grid search
-    const slValues = [0.3, 0.5, 0.7, 1.0];
-    const tpValues = [0.2, 0.35, 0.5, 0.7];
-    const confValues = [0.35, 0.45, 0.55];
+    // Grid search – menší grid pro rychlost
+    const slValues = [0.3, 0.5, 0.8];
+    const tpValues = [0.2, 0.35, 0.5];
+    const confValues = [0.4, 0.5];
 
     const results: Array<BacktestResult & { params: { sl: number; tp: number; conf: number } }> = [];
 
@@ -61,7 +60,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Seřadit podle profit factor × total profit
     results.sort((a, b) => {
       const scoreA = (a.profitFactor === Infinity ? 10 : a.profitFactor) * Math.sign(a.totalProfit) * Math.sqrt(Math.abs(a.totalProfit) + 1);
       const scoreB = (b.profitFactor === Infinity ? 10 : b.profitFactor) * Math.sign(b.totalProfit) * Math.sqrt(Math.abs(b.totalProfit) + 1);
@@ -72,7 +70,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      results: results.slice(0, 20), // top 20
+      results: results.slice(0, 15),
       total: results.length,
     });
   } catch (err) {

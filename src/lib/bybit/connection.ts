@@ -39,6 +39,7 @@ const globalState = globalThis as unknown as {
   __bybit_correlation?: CorrelationMatrix;
   __bybit_funding?: Map<string, FundingSignal>;
   __bybit_trailing?: Map<string, TrailingState>;
+  __bybit_manual_stop?: boolean; // flag pro rozlišení ruční stop vs WS disconnect
   __bybit_check_interval?: ReturnType<typeof setInterval>;
   __bybit_listeners?: Array<(event: string, data: unknown) => void>;
 };
@@ -175,7 +176,11 @@ export function updateConfig(config: Partial<BotConfig>): BotConfig {
 }
 
 export async function startEngine(config: BotConfig): Promise<void> {
-  if (globalState.__bybit_client?.isConnected) stopEngine();
+  if (globalState.__bybit_client?.isConnected) {
+    globalState.__bybit_manual_stop = true; // starý engine se stopne manuálně
+    stopEngine();
+  }
+  globalState.__bybit_manual_stop = false; // nový engine = ne manuální stop
   globalState.__bybit_config = config;
   setState({ status: "connecting", error: undefined });
 
@@ -188,13 +193,21 @@ export async function startEngine(config: BotConfig): Promise<void> {
     globalState.__bybit_client = client;
 
     client.setDisconnectHandler(() => {
+      // Pokud byl ruční stop, NERECONNECTUJ
+      if (globalState.__bybit_manual_stop) {
+        console.log("[WS] Odpojeno (ruční stop) — nereconnectuji");
+        return;
+      }
+
       console.log("[WS] Odpojeno od Binance — pokus o reconnect za 5s...");
       setState({ status: "connecting", error: "Odpojeno — reconnecting..." });
-      // Auto-reconnect po 5s
+
       setTimeout(async () => {
         try {
+          // Znovu zkontroluj — mohl přijít manual stop mezitím
+          if (globalState.__bybit_manual_stop) return;
           const currentConfig = getConfig();
-          if (currentConfig && getState().status !== "stopped") {
+          if (currentConfig) {
             console.log("[WS] Reconnecting...");
             await startEngine(currentConfig);
             console.log("[WS] Reconnect úspěšný!");
@@ -202,16 +215,17 @@ export async function startEngine(config: BotConfig): Promise<void> {
         } catch (err) {
           console.error(`[WS] Reconnect selhal: ${err instanceof Error ? err.message : err}`);
           setState({ status: "error", error: `Reconnect selhal: ${err instanceof Error ? err.message : err}` });
-          // Zkus znovu za 30s
+          // Druhý pokus za 30s
           setTimeout(async () => {
             try {
+              if (globalState.__bybit_manual_stop) return;
               const cfg = getConfig();
-              if (cfg && getState().status !== "stopped" && getState().status !== "running") {
+              if (cfg && getState().status !== "running") {
                 console.log("[WS] Druhý pokus o reconnect...");
                 await startEngine(cfg);
               }
             } catch {
-              setState({ status: "error", error: "Reconnect selhal opakovaně — restartuj ručně" });
+              setState({ status: "error", error: "Reconnect selhal — restartuj ručně" });
             }
           }, 30000);
         }
@@ -262,6 +276,7 @@ export async function startEngine(config: BotConfig): Promise<void> {
 }
 
 export function stopEngine(): void {
+  globalState.__bybit_manual_stop = true; // Signalizuj ruční stop
   if (globalState.__bybit_check_interval) {
     clearInterval(globalState.__bybit_check_interval);
     globalState.__bybit_check_interval = undefined;
