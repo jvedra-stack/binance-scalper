@@ -39,6 +39,7 @@ const globalState = globalThis as unknown as {
   __bybit_correlation?: CorrelationMatrix;
   __bybit_funding?: Map<string, FundingSignal>;
   __bybit_trailing?: Map<string, TrailingState>;
+  __bybit_partialTP?: Set<string>;
   __bybit_manual_stop?: boolean; // flag pro rozlišení ruční stop vs WS disconnect
   __bybit_check_interval?: ReturnType<typeof setInterval>;
   __bybit_listeners?: Array<(event: string, data: unknown) => void>;
