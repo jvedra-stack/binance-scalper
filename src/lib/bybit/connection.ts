@@ -652,6 +652,7 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
 
   // Přepočet USDT → coiny (qty pro Binance musí být v coinech)
   const qtyInCoins = adjustedVolumeUSDT / currentPrice;
+  console.log(`[SIZING] ${instrument.symbol} | config.volume=${instrument.volume} USDT | adjusted=${adjustedVolumeUSDT.toFixed(0)} USDT | price=${currentPrice} | qtyCoins=${qtyInCoins}`);
 
   // Zjisti precision pro qty a price
   let qtyPrecision = 3;

@@ -234,7 +234,9 @@ function calculateRisk(balance: number): RiskConfig {
 }
 
 function calculateVolume(symbol: string, balance: number): number {
-  // Max 5% účtu na trade, minimum 20 USDT
-  const tradeSize = balance * 0.05;
-  return Math.max(20, Math.round(tradeSize));
+  // 10% účtu na trade, minimum 50 USDT
+  // Při balance 500 USDT = 50 USDT per trade
+  // Při balance 1000 USDT = 100 USDT per trade
+  const tradeSize = balance * 0.10;
+  return Math.max(50, Math.round(tradeSize));
 }
