@@ -233,10 +233,7 @@ function calculateRisk(balance: number): RiskConfig {
   };
 }
 
-function calculateVolume(symbol: string, balance: number): number {
-  // 10% účtu na trade, minimum 50 USDT
-  // Při balance 500 USDT = 50 USDT per trade
-  // Při balance 1000 USDT = 100 USDT per trade
-  const tradeSize = balance * 0.10;
-  return Math.max(50, Math.round(tradeSize));
+function calculateVolume(_symbol: string, _balance: number): number {
+  // 1000 USDT pozice (s leverage 20x = ~50 USDT margin)
+  return 1000;
 }
