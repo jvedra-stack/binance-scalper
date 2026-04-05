@@ -5,7 +5,7 @@
 
 import { BybitClient } from "./client";
 import { generateSignal, dynamicPositionSize } from "@/lib/strategy/scalping";
-import { checkRisk, calculateSLTP, calculateTrailingStop, isTrailingStopHit, type TrailingState } from "@/lib/risk/manager";
+import { checkRisk, calculateSLTP, calculateTrailingStop, isTrailingStopHit, isTradeWorthIt, type TrailingState } from "@/lib/risk/manager";
 import { loadServerTrades, saveServerTrades, addServerTrade, getTodayPnL } from "@/lib/server-store";
 import { computeCorrelationMatrix, checkCorrelationRisk, type CorrelationMatrix } from "@/lib/strategy/correlation";
 import { analyzeFundingRate, type FundingRateData, type FundingSignal } from "@/lib/strategy/funding";
@@ -466,6 +466,108 @@ async function periodicCheck(): Promise<void> {
   for (const inst of config.instruments.filter((i) => i.enabled)) {
     await evaluateInstrument(client, inst);
   }
+
+  // Funding Rate jako samostatná strategie
+  // Extrémní funding (> 0.03%) → otevři protisměrnou pozici
+  await evaluateFundingArbitrage(client, config);
+}
+
+async function evaluateFundingArbitrage(client: BybitClient, config: BotConfig): Promise<void> {
+  const fundingMap = getFundingSignals();
+  const state = getState();
+
+  for (const inst of config.instruments.filter((i) => i.enabled)) {
+    const fs = fundingMap.get(inst.symbol);
+    if (!fs || fs.type === "NEUTRAL") continue;
+
+    // Pouze extrémní funding rate (> 0.03%)
+    if (Math.abs(fs.fundingRate) < 0.0003) continue;
+
+    // Směr: jdi PROTI davu
+    const direction: "BUY" | "SELL" = fs.type === "FUNDING_SHORT" ? "SELL" : "BUY";
+
+    // Zkontroluj jestli už nemáme pozici na tomto symbolu
+    const existing = state.openPositions.find(
+      (p) => p.symbol === inst.symbol && p.direction === direction
+    );
+    if (existing) continue;
+
+    // Risk check
+    const fundingSignal = {
+      type: direction, symbol: inst.symbol, price: 0, timestamp: Date.now(),
+      confidence: 0.7, reasons: [`Funding arb: ${fs.reason}`],
+      indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, timestamp: Date.now() },
+    };
+    const riskCheck = checkRisk(fundingSignal, state.openPositions, state.todayTrades, state.todayPnL, config.risk);
+    if (!riskCheck.allowed) continue;
+
+    const lastTick = state.lastTick?.[inst.symbol];
+    if (!lastTick) continue;
+    const currentPrice = lastTick.lastPrice;
+
+    // Menší pozice (50% normální) s tighter SL
+    const volumeUSDT = inst.volume * 0.5;
+    const qtyInCoins = volumeUSDT / currentPrice;
+
+    let qtyPrecision = 3;
+    let pricePrecision = 2;
+    let minQty = 0.001;
+    try {
+      const instrumentsData = await client.getInstruments();
+      const info = instrumentsData.list.find((i) => i.symbol === inst.symbol);
+      if (info) {
+        const step = parseFloat(info.lotSizeFilter.qtyStep);
+        qtyPrecision = step < 1 ? Math.ceil(-Math.log10(step)) : 0;
+        minQty = parseFloat(info.lotSizeFilter.minOrderQty);
+        const tick = parseFloat(info.priceFilter.tickSize);
+        pricePrecision = tick < 1 ? Math.ceil(-Math.log10(tick)) : 0;
+      }
+    } catch { /* default */ }
+
+    const stepSize = Math.pow(10, -qtyPrecision);
+    const adjustedQty = Math.max(minQty, parseFloat((Math.floor(qtyInCoins / stepSize) * stepSize).toFixed(qtyPrecision)));
+
+    // Tighter SL (0.3%), wider TP (0.6%) pro funding arb
+    const slDist = currentPrice * 0.003;
+    const tpDist = currentPrice * 0.006;
+    const sl = direction === "BUY" ? currentPrice - slDist : currentPrice + slDist;
+    const tp = direction === "BUY" ? currentPrice + tpDist : currentPrice - tpDist;
+
+    try {
+      const result = await client.placeOrder({
+        symbol: inst.symbol,
+        side: direction === "BUY" ? "Buy" : "Sell",
+        orderType: "Market",
+        qty: adjustedQty.toFixed(qtyPrecision),
+        stopLoss: sl.toFixed(pricePrecision),
+        takeProfit: tp.toFixed(pricePrecision),
+      });
+
+      const trade: Trade = {
+        id: `funding_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        orderId: result.orderId,
+        symbol: inst.symbol,
+        direction,
+        volume: adjustedQty,
+        openPrice: currentPrice,
+        openTime: Date.now(),
+        sl, tp,
+        status: "open",
+        signal: { ...fundingSignal, price: currentPrice },
+      };
+
+      saveTrade(trade);
+      console.log(`[FUNDING ARB] ${direction} ${inst.symbol} @ ${currentPrice} | FR: ${(fs.fundingRate * 100).toFixed(4)}% | Qty: ${adjustedQty} (${volumeUSDT.toFixed(0)} USDT)`);
+      notifyTradeOpen(trade).catch(() => {});
+
+      setState({
+        openPositions: [...state.openPositions, trade],
+        todayTrades: [...state.todayTrades, trade],
+      });
+    } catch (err) {
+      console.error(`[FUNDING ARB ERROR] ${err instanceof Error ? err.message : err}`);
+    }
+  }
 }
 
 async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Promise<void> {
@@ -632,8 +734,9 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
 }
 
 async function evaluateInstrument(client: BybitClient, instrument: InstrumentConfig): Promise<void> {
-  const klines = getCandleBuffers().get(instrument.symbol);
-  if (!klines || klines.length < 50) return;
+  // Primární TF = 5min (méně šumu než 1min)
+  const klines5m = getMTFCandleBuffers().get(`${instrument.symbol}:5m`);
+  if (!klines5m || klines5m.length < 50) return;
 
   const state = getState();
   const config = getConfig();
@@ -650,15 +753,17 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
     }
   }
 
-  const candles = klines.map(klineToCandle);
+  const candles = klines5m.map(klineToCandle);
 
-  // Multi-timeframe data
+  // MTF confluence: 1min pro timing, 15min pro vyšší trend
   const mtfCandles: Record<string, typeof candles> = {};
-  for (const iv of MTF_INTERVALS) {
-    const mtfKlines = getMTFCandleBuffers().get(`${instrument.symbol}:${iv}`);
-    if (mtfKlines && mtfKlines.length >= 30) {
-      mtfCandles[iv] = mtfKlines.map(klineToCandle);
-    }
+  const klines1m = getCandleBuffers().get(instrument.symbol);
+  if (klines1m && klines1m.length >= 30) {
+    mtfCandles["1m"] = klines1m.map(klineToCandle);
+  }
+  const klines15m = getMTFCandleBuffers().get(`${instrument.symbol}:15m`);
+  if (klines15m && klines15m.length >= 30) {
+    mtfCandles["15m"] = klines15m.map(klineToCandle);
   }
 
   const signal = generateSignal(instrument.symbol, candles, currentPrice, config.strategy, mtfCandles);
@@ -719,6 +824,13 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
       console.log(`[CORR FILTER] ${corrCheck.reason}`);
       return;
     }
+  }
+
+  // Fee-aware EV filtr — trade se vyplatí jen pokud expected value > 0
+  const evCheck = isTradeWorthIt(signal.confidence, instrument.slPercent, instrument.tpPercent);
+  if (!evCheck.worthIt) {
+    console.log(`[EV FILTER] ${instrument.symbol} ${signal.type} EV=${evCheck.expectedValue.toFixed(3)}% → nevyplatí se`);
+    return;
   }
 
   // Dynamický position sizing (instrument.volume je v USDT)

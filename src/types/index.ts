@@ -198,11 +198,11 @@ export const DEFAULT_INSTRUMENTS: InstrumentConfig[] = [
   { symbol: "BTCUSDT", label: "Bitcoin", enabled: true, volume: 1000, slPercent: 0.4, tpPercent: 0.8 },
   { symbol: "ETHUSDT", label: "Ethereum", enabled: true, volume: 1000, slPercent: 0.4, tpPercent: 0.8 },
   { symbol: "SOLUSDT", label: "Solana", enabled: true, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
-  { symbol: "DOGEUSDT", label: "Doge", enabled: true, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
-  { symbol: "PEPEUSDT", label: "Pepe", enabled: true, volume: 1000, slPercent: 0.6, tpPercent: 1.0 },
-  { symbol: "XRPUSDT", label: "XRP", enabled: true, volume: 1000, slPercent: 0.4, tpPercent: 0.8 },
-  { symbol: "AVAXUSDT", label: "Avalanche", enabled: true, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
-  { symbol: "SUIUSDT", label: "Sui", enabled: true, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
+  { symbol: "DOGEUSDT", label: "Doge", enabled: false, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
+  { symbol: "PEPEUSDT", label: "Pepe", enabled: false, volume: 1000, slPercent: 0.6, tpPercent: 1.0 },
+  { symbol: "XRPUSDT", label: "XRP", enabled: false, volume: 1000, slPercent: 0.4, tpPercent: 0.8 },
+  { symbol: "AVAXUSDT", label: "Avalanche", enabled: false, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
+  { symbol: "SUIUSDT", label: "Sui", enabled: false, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
 ];
 
 export const DEFAULT_STRATEGY: StrategyConfig = {
@@ -214,7 +214,7 @@ export const DEFAULT_STRATEGY: StrategyConfig = {
   bbPeriod: 20,
   bbStdDev: 2,
   atrPeriod: 14,
-  minConfidence: 0.45,
+  minConfidence: 0.65,
 };
 
 export const DEFAULT_RISK: RiskConfig = {

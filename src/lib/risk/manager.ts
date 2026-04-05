@@ -52,6 +52,22 @@ export function checkRisk(
 }
 
 /**
+ * Fee-aware Expected Value filtr
+ * Spočítá jestli se trade matematicky vyplatí po odečtení poplatků
+ * EV = (confidence × tpPercent) - ((1 - confidence) × slPercent) - feePercent
+ */
+const ROUND_TRIP_FEE_PERCENT = 0.1; // 0.04% maker + 0.06% taker × 2 strany
+
+export function isTradeWorthIt(
+  confidence: number,
+  slPercent: number,
+  tpPercent: number
+): { worthIt: boolean; expectedValue: number } {
+  const expectedValue = (confidence * tpPercent) - ((1 - confidence) * slPercent) - ROUND_TRIP_FEE_PERCENT;
+  return { worthIt: expectedValue > 0, expectedValue };
+}
+
+/**
  * Vypočítá SL/TP ceny na základě procent
  */
 export function calculateSLTP(

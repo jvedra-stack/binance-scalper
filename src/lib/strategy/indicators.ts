@@ -175,6 +175,76 @@ export function vwap(
 }
 
 /**
+ * ADX – Average Directional Index
+ * Měří sílu trendu (ne směr). ADX > 25 = silný trend, < 20 = ranging/choppy
+ */
+export function adx(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period: number = 14
+): number[] {
+  if (highs.length < period * 2 + 1) return [];
+
+  const plusDM: number[] = [];
+  const minusDM: number[] = [];
+  const trueRanges: number[] = [];
+
+  for (let i = 1; i < highs.length; i++) {
+    const upMove = highs[i] - highs[i - 1];
+    const downMove = lows[i - 1] - lows[i];
+
+    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+
+    const tr = Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i] - closes[i - 1])
+    );
+    trueRanges.push(tr);
+  }
+
+  // Wilder smoothing pro ATR, +DM, -DM
+  const smooth = (arr: number[], p: number): number[] => {
+    const result: number[] = [];
+    let sum = 0;
+    for (let i = 0; i < p; i++) sum += arr[i];
+    result.push(sum);
+    for (let i = p; i < arr.length; i++) {
+      result.push(result[result.length - 1] - result[result.length - 1] / p + arr[i]);
+    }
+    return result;
+  };
+
+  const smoothTR = smooth(trueRanges, period);
+  const smoothPlusDM = smooth(plusDM, period);
+  const smoothMinusDM = smooth(minusDM, period);
+
+  // +DI a -DI
+  const dx: number[] = [];
+  for (let i = 0; i < smoothTR.length; i++) {
+    if (smoothTR[i] === 0) { dx.push(0); continue; }
+    const plusDI = (smoothPlusDM[i] / smoothTR[i]) * 100;
+    const minusDI = (smoothMinusDM[i] / smoothTR[i]) * 100;
+    const diSum = plusDI + minusDI;
+    dx.push(diSum === 0 ? 0 : (Math.abs(plusDI - minusDI) / diSum) * 100);
+  }
+
+  // ADX = smoothed DX
+  if (dx.length < period) return [];
+  const result: number[] = [];
+  let adxSum = 0;
+  for (let i = 0; i < period; i++) adxSum += dx[i];
+  result.push(adxSum / period);
+  for (let i = period; i < dx.length; i++) {
+    result.push((result[result.length - 1] * (period - 1) + dx[i]) / period);
+  }
+
+  return result;
+}
+
+/**
  * Stochastic RSI – přesnější signály než samotné RSI
  * Měří pozici RSI v jeho vlastním rozsahu
  */

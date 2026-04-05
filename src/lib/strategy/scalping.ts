@@ -22,6 +22,7 @@ interface CandleRecord {
 }
 
 import { ema, rsi, bollingerBands, atr, stochRsi } from "./indicators";
+import { detectRegime } from "./regime";
 
 function extractData(candles: CandleRecord[]) {
   return {
@@ -256,13 +257,32 @@ export function generateSignal(
   let totalBuy = 0;
   let totalSell = 0;
 
-  // Spusť všechny strategie
-  const strats = [
-    emaScalpScore(indicators, config, closes),
-    meanReversionScore(indicators, currentPrice),
-    breakoutScore(candles, indicators, currentPrice),
-    momentumScore(indicators, config, closes, candles),
-  ];
+  // Market Regime Detection — vyber strategie podle stavu trhu
+  const { regime, reason: regimeReason } = detectRegime(candles);
+  reasons.push(`Regime: ${regime} — ${regimeReason}`);
+
+  // CHAOTIC → neobchoduj
+  if (regime === "CHAOTIC") {
+    return {
+      type: "HOLD", symbol, price: currentPrice, timestamp: Date.now(),
+      confidence: 0, reasons: [...reasons, "CHAOTIC režim → žádný obchod"],
+      indicators,
+    };
+  }
+
+  // Vyber strategie podle režimu
+  const strats: Array<{ buy: number; sell: number; reasons: string[] }> = [];
+
+  if (regime === "TRENDING") {
+    // V trendu: EMA Scalp + Breakout + Momentum (ne Mean Reversion!)
+    strats.push(emaScalpScore(indicators, config, closes));
+    strats.push(breakoutScore(candles, indicators, currentPrice));
+    strats.push(momentumScore(indicators, config, closes, candles));
+  } else {
+    // RANGING: Mean Reversion + Momentum (ne Breakout, ne EMA crossover!)
+    strats.push(meanReversionScore(indicators, currentPrice));
+    strats.push(momentumScore(indicators, config, closes, candles));
+  }
 
   for (const s of strats) {
     totalBuy += s.buy;
