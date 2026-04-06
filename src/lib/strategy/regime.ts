@@ -53,8 +53,8 @@ export function detectRegime(candles: CandleRecord[]): { regime: MarketRegime; a
   const hasEmaTrend = ema20.length > 0 && ema50.length > 0 &&
     Math.abs(ema20[ema20.length - 1] - ema50[ema50.length - 1]) / ema50[ema50.length - 1] > 0.001;
 
-  // CHAOTIC: nízký ADX + vysoká volatilita = nepředvídatelný trh
-  if (currentADX < 20 && currentATR > avgATR * 2) {
+  // CHAOTIC: nízký ADX + extrémní volatilita = nepředvídatelný trh
+  if (currentADX < 15 && currentATR > avgATR * 3) {
     return {
       regime: "CHAOTIC",
       adxValue: currentADX,

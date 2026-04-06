@@ -34,14 +34,14 @@ export function checkRisk(
     return { allowed: false, reason: `Již existuje otevřená ${signal.type} pozice na ${signal.symbol}` };
   }
 
-  // 5. Dynamický cooldown — po prohře 60s, po výhře 10s
+  // 5. Dynamický cooldown — po prohře 30s, po výhře 8s
   const lastClosed = todayTrades
     .filter((t) => t.symbol === signal.symbol && t.status === "closed")
     .sort((a, b) => (b.closeTime || 0) - (a.closeTime || 0))[0];
 
   if (lastClosed && lastClosed.closeTime) {
     const wasLoss = (lastClosed.profit || 0) <= 0;
-    const cooldownMs = wasLoss ? 60000 : 10000; // 60s po ztrátě, 10s po zisku
+    const cooldownMs = wasLoss ? 30000 : 8000; // 30s po ztrátě, 8s po zisku
     const elapsed = Date.now() - lastClosed.closeTime;
     if (elapsed < cooldownMs) {
       return { allowed: false, reason: `Cooldown ${wasLoss ? "po ztrátě" : ""}: ${signal.symbol} čekej ${((cooldownMs - elapsed) / 1000).toFixed(0)}s` };

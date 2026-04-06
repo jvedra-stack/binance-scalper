@@ -216,7 +216,7 @@ export const DEFAULT_STRATEGY: StrategyConfig = {
   bbPeriod: 20,
   bbStdDev: 2,
   atrPeriod: 14,
-  minConfidence: 0.65,
+  minConfidence: 0.50,
 };
 
 export const DEFAULT_RISK: RiskConfig = {
