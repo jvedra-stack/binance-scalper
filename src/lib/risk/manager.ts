@@ -41,7 +41,7 @@ export function checkRisk(
 
   if (lastClosed && lastClosed.closeTime) {
     const wasLoss = (lastClosed.profit || 0) <= 0;
-    const cooldownMs = wasLoss ? 120000 : 15000; // 120s po ztrátě, 15s po zisku
+    const cooldownMs = wasLoss ? 60000 : 10000; // 60s po ztrátě, 10s po zisku
     const elapsed = Date.now() - lastClosed.closeTime;
     if (elapsed < cooldownMs) {
       return { allowed: false, reason: `Cooldown ${wasLoss ? "po ztrátě" : ""}: ${signal.symbol} čekej ${((cooldownMs - elapsed) / 1000).toFixed(0)}s` };

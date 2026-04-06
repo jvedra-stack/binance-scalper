@@ -234,37 +234,35 @@ export async function startEngine(config: BotConfig): Promise<void> {
         return;
       }
 
-      console.log("[WS] Odpojeno od Binance — pokus o reconnect za 5s...");
+      console.log("[WS] Odpojeno od Binance — reconnect za 5s...");
       setState({ status: "connecting", error: "Odpojeno — reconnecting..." });
 
-      setTimeout(async () => {
+      // Lehký reconnect — jen WS, ne celý engine (zachová buffery, trailing state, atd.)
+      const reconnect = async (attempt: number) => {
+        if (globalState.__bybit_manual_stop) return;
+        if (getState().status === "running") return; // už běží
         try {
-          // Znovu zkontroluj — mohl přijít manual stop mezitím
-          if (globalState.__bybit_manual_stop) return;
-          const currentConfig = getConfig();
-          if (currentConfig) {
-            console.log("[WS] Reconnecting...");
-            await startEngine(currentConfig);
-            console.log("[WS] Reconnect úspěšný!");
+          console.log(`[WS] Reconnect pokus #${attempt}...`);
+          await client.connectPublicWs();
+          // Znovu subscribuj všechny enabled instrumenty
+          const cfg = getConfig();
+          for (const inst of cfg.instruments.filter((i) => i.enabled)) {
+            subscribeInstrument(client, inst);
           }
+          setState({ status: "running", error: undefined });
+          console.log(`[WS] Reconnect #${attempt} úspěšný!`);
         } catch (err) {
-          console.error(`[WS] Reconnect selhal: ${err instanceof Error ? err.message : err}`);
-          setState({ status: "error", error: `Reconnect selhal: ${err instanceof Error ? err.message : err}` });
-          // Druhý pokus za 30s
-          setTimeout(async () => {
-            try {
-              if (globalState.__bybit_manual_stop) return;
-              const cfg = getConfig();
-              if (cfg && getState().status !== "running") {
-                console.log("[WS] Druhý pokus o reconnect...");
-                await startEngine(cfg);
-              }
-            } catch {
-              setState({ status: "error", error: "Reconnect selhal — restartuj ručně" });
-            }
-          }, 30000);
+          console.error(`[WS] Reconnect #${attempt} selhal: ${err instanceof Error ? err.message : err}`);
+          if (attempt < 5) {
+            const delay = Math.min(5000 * attempt, 30000); // 5s, 10s, 15s, 20s, 25s
+            setTimeout(() => reconnect(attempt + 1), delay);
+          } else {
+            setState({ status: "error", error: "Reconnect selhal 5× — restartuj ručně" });
+          }
         }
-      }, 5000);
+      };
+
+      setTimeout(() => reconnect(1), 5000);
     });
 
     const enabled = config.instruments.filter((i) => i.enabled);

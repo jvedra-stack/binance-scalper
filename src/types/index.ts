@@ -220,7 +220,7 @@ export const DEFAULT_STRATEGY: StrategyConfig = {
 
 export const DEFAULT_RISK: RiskConfig = {
   maxOpenPositions: 4,
-  maxDailyLoss: 50, // USDT
+  maxDailyLoss: 100, // USDT
   trailingStop: true,
   trailingStopPercent: 0.2,
 };
