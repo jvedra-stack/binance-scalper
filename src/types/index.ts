@@ -100,6 +100,7 @@ export interface IndicatorValues {
   atr: number;
   volume: number;
   stochRsi: number;
+  vwap: number;
   timestamp: number;
 }
 

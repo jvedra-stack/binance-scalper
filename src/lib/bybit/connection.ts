@@ -40,6 +40,7 @@ const globalState = globalThis as unknown as {
   __bybit_funding?: Map<string, FundingSignal>;
   __bybit_trailing?: Map<string, TrailingState>;
   __bybit_partialTP?: Set<string>;
+  __bybit_atr_cache?: Map<string, number>; // ATR per symbol pro trailing stop
   __bybit_manual_stop?: boolean; // flag pro rozlišení ruční stop vs WS disconnect
   __bybit_check_interval?: ReturnType<typeof setInterval>;
   __bybit_listeners?: Array<(event: string, data: unknown) => void>;
@@ -300,7 +301,7 @@ export async function startEngine(config: BotConfig): Promise<void> {
             type: (p.side === "Buy" ? "BUY" : "SELL") as "BUY" | "SELL",
             symbol: p.symbol, price: parseFloat(p.avgPrice), timestamp: Date.now(),
             confidence: 0, reasons: ["Sync z Binance"],
-            indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, timestamp: Date.now() },
+            indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, vwap: 0, timestamp: Date.now() },
           },
         }));
       setState({ openPositions });
@@ -436,10 +437,16 @@ async function periodicCheck(): Promise<void> {
       } catch { /* ok */ }
     }
 
-    // ML: přetrénuj model každých ~5 minut (každý 37. check)
+    // Balance refresh každých ~5 minut (každý 37. check)
     if (checkCount % 37 === 0) {
-      // ML training dočasně vypnuto — čeká na nová data s novým R:R
-      // try { trainModel(); } catch { /* ok */ }
+      try {
+        const bal = await client.getBalance();
+        const equity = parseFloat(bal.list?.[0]?.totalEquity || "0");
+        if (equity > 0) {
+          setState({ balance: equity });
+          console.log(`[BALANCE] Aktuální balance: ${equity.toFixed(2)} USDT`);
+        }
+      } catch { /* ok */ }
     }
 
     try {
@@ -495,7 +502,7 @@ async function evaluateFundingArbitrage(client: BybitClient, config: BotConfig):
     const fundingSignal = {
       type: direction, symbol: inst.symbol, price: 0, timestamp: Date.now(),
       confidence: 0.7, reasons: [`Funding arb: ${fs.reason}`],
-      indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, timestamp: Date.now() },
+      indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, vwap: 0, timestamp: Date.now() },
     };
     const riskCheck = checkRisk(fundingSignal, state.openPositions, state.todayTrades, state.todayPnL, config.risk);
     if (!riskCheck.allowed) continue;
@@ -588,7 +595,7 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
           type: (p.side === "Buy" ? "BUY" : "SELL") as "BUY" | "SELL",
           symbol: p.symbol, price: parseFloat(p.avgPrice), timestamp: Date.now(),
           confidence: 0, reasons: ["Sync"],
-          indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, timestamp: Date.now() },
+          indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, vwap: 0, timestamp: Date.now() },
         },
       }));
 
@@ -618,8 +625,9 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
       };
 
       if (config.risk.trailingStop) {
+        const symbolATR = globalState.__bybit_atr_cache?.get(pos.symbol);
         trailState = calculateTrailingStop(
-          trailState, currentPrice, pos.openPrice, config.risk.trailingStopPercent
+          trailState, currentPrice, pos.openPrice, config.risk.trailingStopPercent, symbolATR
         );
         trailingMap.set(trailKey, trailState);
 
@@ -708,7 +716,7 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
           type: (p.side === "Buy" ? "BUY" : "SELL") as "BUY" | "SELL",
           symbol: p.symbol, price: parseFloat(p.avgPrice), timestamp: Date.now(),
           confidence: 0, reasons: ["Sync"],
-          indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, timestamp: Date.now() },
+          indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, vwap: 0, timestamp: Date.now() },
         },
       }));
 
@@ -792,6 +800,10 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
   const signals = [...state.signals.filter((s) => s.symbol !== instrument.symbol), signal];
   setState({ signals });
 
+  // Ulož ATR pro trailing stop
+  if (!globalState.__bybit_atr_cache) globalState.__bybit_atr_cache = new Map();
+  if (signal.indicators.atr > 0) globalState.__bybit_atr_cache.set(instrument.symbol, signal.indicators.atr);
+
   if (signal.type === "HOLD") {
     console.log(`[SIGNAL] ${instrument.symbol} HOLD (conf: ${(signal.confidence * 100).toFixed(0)}%)`);
     return;
@@ -843,13 +855,17 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
   // Clear blocked flag — trade projde všemi filtry
   signal.blocked = undefined;
 
-  // Dynamický position sizing (instrument.volume je v USDT)
+  // Dynamický position sizing — 5% balance jako base, s anti-martingale úpravou
+  const balance = state.balance || 0;
+  const baseVolumeUSDT = balance > 0
+    ? Math.min(5000, Math.max(100, balance * 0.05 * 50)) // 5% balance × 50x leverage, min 100, max 5000
+    : instrument.volume; // fallback na config pokud balance neznámý
   const recentTrades = getTrades().slice(-10).map((t) => ({ profit: t.profit || 0 }));
-  const adjustedVolumeUSDT = dynamicPositionSize(instrument.volume, recentTrades);
+  const adjustedVolumeUSDT = dynamicPositionSize(baseVolumeUSDT, recentTrades);
 
   // Přepočet USDT → coiny (qty pro Binance musí být v coinech)
   const qtyInCoins = adjustedVolumeUSDT / currentPrice;
-  console.log(`[SIZING] ${instrument.symbol} | config.volume=${instrument.volume} USDT | adjusted=${adjustedVolumeUSDT.toFixed(0)} USDT | price=${currentPrice} | qtyCoins=${qtyInCoins}`);
+  console.log(`[SIZING] ${instrument.symbol} | balance=${balance.toFixed(0)} | base=${baseVolumeUSDT.toFixed(0)} | adjusted=${adjustedVolumeUSDT.toFixed(0)} USDT | price=${currentPrice}`);
 
   // Zjisti precision pro qty a price
   let qtyPrecision = 3;

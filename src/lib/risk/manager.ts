@@ -118,21 +118,30 @@ export interface TrailingState {
 }
 
 /**
- * Vypočítá nový trailing stop na základě aktuální ceny
- * - Breakeven: pokud zisk > 0.2%, posuň SL na entry cenu
- * - Trailing: pokud zisk > 0.3%, posuň SL o trailingPercent pod high water mark
+ * ATR-based trailing stop
+ * - Breakeven: profit > ATR × 0.5 → SL na entry + buffer
+ * - Trailing: profit > ATR × 1.0 → trailing distance = ATR × 1.0
+ * - Fallback na fixní % pokud ATR není dostupný
  */
 export function calculateTrailingStop(
   state: TrailingState,
   currentPrice: number,
   entryPrice: number,
-  trailingPercent: number = 0.2
+  trailingPercent: number = 0.2,
+  atr?: number
 ): TrailingState {
   const updated = { ...state };
 
   const pnlPercent = state.direction === "BUY"
     ? ((currentPrice - entryPrice) / entryPrice) * 100
     : ((entryPrice - currentPrice) / entryPrice) * 100;
+
+  // ATR-based prahy (nebo fallback na fixní %)
+  const breakevenThreshold = atr ? ((atr * 0.5) / entryPrice) * 100 : 0.2;
+  const trailingThreshold = atr ? ((atr * 1.0) / entryPrice) * 100 : 0.3;
+  const trailDistance = atr
+    ? atr * 1.0 // ATR × 1.0 = volatilitě přizpůsobený trailing
+    : updated.highWaterMark * (trailingPercent / 100); // fallback fixní %
 
   // Update high water mark
   if (state.direction === "BUY") {
@@ -143,19 +152,18 @@ export function calculateTrailingStop(
       : Math.min(state.highWaterMark, currentPrice);
   }
 
-  // Breakeven: pokud zisk > 0.2%, posuň SL na entry + malý buffer
-  if (pnlPercent > 0.2 && !state.breakevenActivated) {
+  // Breakeven: profit > threshold → SL na entry + buffer
+  if (pnlPercent > breakevenThreshold && !state.breakevenActivated) {
     updated.breakevenActivated = true;
-    const buffer = entryPrice * 0.02 / 100; // 0.02% buffer
+    const buffer = entryPrice * 0.0002; // 0.02% buffer
     updated.currentTrailingStop = state.direction === "BUY"
       ? entryPrice + buffer
       : entryPrice - buffer;
   }
 
-  // Trailing: pokud zisk > 0.3%, trailing stop sleduje cenu
-  if (pnlPercent > 0.3) {
+  // Trailing: profit > threshold → trailing stop sleduje cenu
+  if (pnlPercent > trailingThreshold) {
     updated.trailingActivated = true;
-    const trailDistance = updated.highWaterMark * (trailingPercent / 100);
 
     const newTrailingStop = state.direction === "BUY"
       ? updated.highWaterMark - trailDistance

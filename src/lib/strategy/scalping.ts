@@ -21,7 +21,7 @@ interface CandleRecord {
   ctmString: string;
 }
 
-import { ema, rsi, bollingerBands, atr, stochRsi } from "./indicators";
+import { ema, rsi, bollingerBands, atr, stochRsi, vwap } from "./indicators";
 import { detectRegime } from "./regime";
 
 function extractData(candles: CandleRecord[]) {
@@ -47,6 +47,7 @@ export function computeIndicators(
   const bb = bollingerBands(closes, config.bbPeriod, config.bbStdDev);
   const atrArr = atr(highs, lows, closes, config.atrPeriod);
   const stochRsiArr = stochRsi(closes, config.rsiPeriod, 14);
+  const vwapArr = vwap(closes, volumes);
 
   if (!emaFastArr.length || !emaSlowArr.length || !rsiArr.length || !bb.upper.length || !atrArr.length) {
     return null;
@@ -61,6 +62,7 @@ export function computeIndicators(
     atr: atrArr[atrArr.length - 1],
     volume: volumes[volumes.length - 1],
     stochRsi: stochRsiArr.length > 0 ? stochRsiArr[stochRsiArr.length - 1] : 50,
+    vwap: vwapArr.length > 0 ? vwapArr[vwapArr.length - 1] : 0,
     timestamp: Date.now(),
   };
 }
@@ -248,7 +250,7 @@ export function generateSignal(
     return {
       type: "HOLD", symbol, price: currentPrice, timestamp: Date.now(),
       confidence: 0, reasons: ["Nedostatek dat"],
-      indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, timestamp: Date.now() },
+      indicators: { emaFast: 0, emaSlow: 0, rsi: 50, bbUpper: 0, bbMiddle: 0, bbLower: 0, atr: 0, volume: 0, stochRsi: 50, vwap: 0, timestamp: Date.now() },
     };
   }
 
@@ -299,6 +301,23 @@ export function generateSignal(
       totalBuy *= 0.7;
       totalSell *= 0.7;
       reasons.push(`Low volume: ${(recentAvgVol / avgVol20 * 100).toFixed(0)}% průměru → confidence -30%`);
+    }
+  }
+
+  // VWAP filtr — cena pod VWAP = kupuj (pod fair value), nad = prodávej
+  if (indicators.vwap > 0) {
+    if (currentPrice < indicators.vwap && totalBuy > totalSell) {
+      totalBuy += 0.15;
+      reasons.push(`VWAP: cena pod VWAP → buy posílen`);
+    } else if (currentPrice > indicators.vwap && totalSell > totalBuy) {
+      totalSell += 0.15;
+      reasons.push(`VWAP: cena nad VWAP → sell posílen`);
+    } else if (currentPrice > indicators.vwap && totalBuy > totalSell) {
+      totalBuy *= 0.9;
+      reasons.push(`VWAP: buy nad VWAP → oslaben`);
+    } else if (currentPrice < indicators.vwap && totalSell > totalBuy) {
+      totalSell *= 0.9;
+      reasons.push(`VWAP: sell pod VWAP → oslaben`);
     }
   }
 
