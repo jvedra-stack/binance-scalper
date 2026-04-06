@@ -479,8 +479,8 @@ async function evaluateFundingArbitrage(client: BybitClient, config: BotConfig):
     const fs = fundingMap.get(inst.symbol);
     if (!fs || fs.type === "NEUTRAL") continue;
 
-    // Pouze extrémní funding rate (> 0.03%)
-    if (Math.abs(fs.fundingRate) < 0.0003) continue;
+    // Funding rate > 0.015% → protisměrná pozice
+    if (Math.abs(fs.fundingRate) < 0.00015) continue;
 
     // Směr: jdi PROTI davu
     const direction: "BUY" | "SELL" = fs.type === "FUNDING_SHORT" ? "SELL" : "BUY";
@@ -602,7 +602,7 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
 
     for (const pos of openPositions) {
       const posValue = pos.openPrice * pos.volume;
-      const lossPercent = posValue > 0 ? (Math.abs(pos.profit || 0) / posValue) * 100 : 0;
+      const pnlPercent = posValue > 0 ? (Math.abs(pos.profit || 0) / posValue) * 100 : 0;
       const tick = getState().lastTick?.[pos.symbol];
       const currentPrice = tick?.lastPrice || pos.openPrice;
 
@@ -611,7 +611,7 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
       let trailState = trailingMap.get(trailKey) || {
         symbol: pos.symbol,
         direction: pos.direction,
-        highWaterMark: 0,
+        highWaterMark: currentPrice, // FIX: init na aktuální cenu, ne 0
         breakevenActivated: false,
         trailingActivated: false,
         currentTrailingStop: 0,
@@ -637,9 +637,9 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
         }
       }
 
-      // Server-side SL: zavři pozice s > 0.6% ztrátou
-      if ((pos.profit || 0) < 0 && lossPercent > 0.6) {
-        console.log(`[SL] Zavírám ${pos.symbol} ${pos.direction} — ztráta ${pos.profit?.toFixed(2)} (${lossPercent.toFixed(1)}%)`);
+      // Server-side SL: zavři pozice s > 1.2% ztrátou (safety net — Binance SL by měl chytit dřív)
+      if ((pos.profit || 0) < 0 && pnlPercent > 1.2) {
+        console.log(`[SL] Zavírám ${pos.symbol} ${pos.direction} — ztráta ${pos.profit?.toFixed(2)} (${pnlPercent.toFixed(1)}%)`);
         try {
           await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
           closeTradeRecord(pos, currentPrice, pos.profit || 0);
@@ -647,13 +647,15 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
         } catch (err) {
           console.error(`[SL] Chyba: ${err instanceof Error ? err.message : err}`);
         }
+        continue;
       }
-      // Partial TP: na 0.5% zisku zavři 50% pozice, zbytek nech na trailing
+
+      // Partial TP: na 1.0% zisku zavři 50% pozice, zbytek nech na trailing
       const partialKey = `${pos.symbol}_${pos.direction}`;
-      if ((pos.profit || 0) > 0 && lossPercent > 0.5 && !partialTPSet.has(partialKey)) {
+      if ((pos.profit || 0) > 0 && pnlPercent > 1.0 && !partialTPSet.has(partialKey)) {
         const halfQty = (pos.volume / 2);
         if (halfQty > 0) {
-          console.log(`[PARTIAL TP] ${pos.symbol} ${pos.direction} — zavírám 50% @ ${currentPrice.toFixed(2)} (zisk ${lossPercent.toFixed(1)}%)`);
+          console.log(`[PARTIAL TP] ${pos.symbol} ${pos.direction} — zavírám 50% @ ${currentPrice.toFixed(2)} (zisk ${pnlPercent.toFixed(1)}%)`);
           try {
             await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", halfQty.toString());
             partialTPSet.add(partialKey);
@@ -663,9 +665,9 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
         }
       }
 
-      // Server-side TP: zavři pozice s > 1.0% ziskem (pokud trailing neběží)
-      if (!trailState.trailingActivated && (pos.profit || 0) > 0 && lossPercent > 1.0) {
-        console.log(`[TP] Zavírám ${pos.symbol} ${pos.direction} — zisk ${pos.profit?.toFixed(2)} (${lossPercent.toFixed(1)}%)`);
+      // Server-side TP: zavři pozice s > 2.5% ziskem (safety net — nechej trailing/Binance TP pracovat)
+      if (!trailState.trailingActivated && (pos.profit || 0) > 0 && pnlPercent > 2.5) {
+        console.log(`[TP] Zavírám ${pos.symbol} ${pos.direction} — zisk ${pos.profit?.toFixed(2)} (${pnlPercent.toFixed(1)}%)`);
         try {
           await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
           closeTradeRecord(pos, currentPrice, pos.profit || 0);
@@ -735,7 +737,7 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
 async function evaluateInstrument(client: BybitClient, instrument: InstrumentConfig): Promise<void> {
   // Primární TF = 5min (méně šumu než 1min)
   const klines5m = getMTFCandleBuffers().get(`${instrument.symbol}:5m`);
-  if (!klines5m || klines5m.length < 50) return;
+  if (!klines5m || klines5m.length < 30) return; // 30× 5min = 2.5h (stáhne se 100 z REST API při startu)
 
   const state = getState();
   const config = getConfig();
@@ -836,13 +838,6 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
       blockSignal(corrCheck.reason || "Korelační filtr");
       return;
     }
-  }
-
-  // Fee-aware EV filtr — trade se vyplatí jen pokud expected value > 0
-  const evCheck = isTradeWorthIt(signal.confidence, instrument.slPercent, instrument.tpPercent);
-  if (!evCheck.worthIt) {
-    blockSignal(`EV=${evCheck.expectedValue.toFixed(3)}% → nevyplatí se po fees`);
-    return;
   }
 
   // Clear blocked flag — trade projde všemi filtry

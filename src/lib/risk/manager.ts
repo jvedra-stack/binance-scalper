@@ -34,7 +34,7 @@ export function checkRisk(
     return { allowed: false, reason: `Již existuje otevřená ${signal.type} pozice na ${signal.symbol}` };
   }
 
-  // 5. Dynamický cooldown — po prohře 120s, po výhře 15s
+  // 5. Dynamický cooldown — po prohře 60s, po výhře 10s
   const lastClosed = todayTrades
     .filter((t) => t.symbol === signal.symbol && t.status === "closed")
     .sort((a, b) => (b.closeTime || 0) - (a.closeTime || 0))[0];

@@ -26,7 +26,7 @@ interface CandleRecord {
  * - CHAOTIC: ADX < 20 + ATR > 2× průměr → nepředvídatelný trh, neobchoduj
  */
 export function detectRegime(candles: CandleRecord[]): { regime: MarketRegime; adxValue: number; reason: string } {
-  if (candles.length < 50) {
+  if (candles.length < 30) {
     return { regime: "RANGING", adxValue: 0, reason: "Nedostatek dat pro regime detection" };
   }
 

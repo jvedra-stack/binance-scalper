@@ -37,7 +37,7 @@ export function analyzeFundingRate(data: FundingRateData): FundingSignal {
       fundingRate: rate,
       annualizedRate: annualized,
       reason: `Funding ${(rate * 100).toFixed(4)}% (${annualized.toFixed(0)}% p.a.) — extrémně pozitivní, short bias`,
-      confidence: Math.min(0.3, Math.abs(rate) * 100),
+      confidence: Math.min(0.7, Math.abs(rate) * 500),
     };
   }
 
@@ -48,7 +48,7 @@ export function analyzeFundingRate(data: FundingRateData): FundingSignal {
       fundingRate: rate,
       annualizedRate: annualized,
       reason: `Funding ${(rate * 100).toFixed(4)}% (${annualized.toFixed(0)}% p.a.) — pozitivní, mírný short bias`,
-      confidence: Math.min(0.15, Math.abs(rate) * 50),
+      confidence: Math.min(0.4, Math.abs(rate) * 300),
     };
   }
 
@@ -60,7 +60,7 @@ export function analyzeFundingRate(data: FundingRateData): FundingSignal {
       fundingRate: rate,
       annualizedRate: annualized,
       reason: `Funding ${(rate * 100).toFixed(4)}% (${annualized.toFixed(0)}% p.a.) — extrémně negativní, long bias`,
-      confidence: Math.min(0.3, Math.abs(rate) * 100),
+      confidence: Math.min(0.7, Math.abs(rate) * 500),
     };
   }
 
@@ -71,7 +71,7 @@ export function analyzeFundingRate(data: FundingRateData): FundingSignal {
       fundingRate: rate,
       annualizedRate: annualized,
       reason: `Funding ${(rate * 100).toFixed(4)}% (${annualized.toFixed(0)}% p.a.) — negativní, mírný long bias`,
-      confidence: Math.min(0.15, Math.abs(rate) * 50),
+      confidence: Math.min(0.4, Math.abs(rate) * 300),
     };
   }
 
