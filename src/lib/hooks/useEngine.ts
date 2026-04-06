@@ -22,8 +22,22 @@ export function useEngine() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    setConfig(loadConfig());
-    setHydrated(true);
+    // Načti config ze SERVERU (source of truth), ne z localStorage
+    fetch("/api/xtb/config")
+      .then((res) => res.ok ? res.json() : null)
+      .then((serverConfig) => {
+        if (serverConfig && serverConfig.instruments) {
+          setConfig(serverConfig);
+          saveConfig(serverConfig); // sync localStorage se serverem
+        } else {
+          setConfig(loadConfig()); // fallback na localStorage
+        }
+        setHydrated(true);
+      })
+      .catch(() => {
+        setConfig(loadConfig());
+        setHydrated(true);
+      });
   }, []);
 
   const fetchState = useCallback(async () => {
@@ -34,6 +48,10 @@ export function useEngine() {
         setState(data.state);
         if (data.hasServerCredentials !== undefined) {
           setServerHasCredentials(data.hasServerCredentials);
+        }
+        // Sync config ze serveru (server je source of truth)
+        if (data.config) {
+          setConfig(data.config);
         }
       }
     } catch { /* ok */ }
@@ -65,10 +83,11 @@ export function useEngine() {
     saveConfig(config);
     setState((s) => ({ ...s, status: "connecting", error: undefined }));
     try {
+      // Posílej jen credentials — server použije vlastní instrumenty/strategy/risk
       const res = await fetch("/api/xtb/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+        body: JSON.stringify({ credentials: config.credentials }),
       });
       const data = await res.json();
       if (!data.ok) {
