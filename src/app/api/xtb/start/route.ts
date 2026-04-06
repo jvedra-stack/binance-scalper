@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { startEngine, updateConfig } from "@/lib/bybit/connection";
-import { loadServerConfig, saveServerConfig } from "@/lib/server-store";
+import { saveServerConfig } from "@/lib/server-store";
 import { DEFAULT_INSTRUMENTS, DEFAULT_STRATEGY, DEFAULT_RISK } from "@/types";
 import type { BotConfig } from "@/types";
 
@@ -8,17 +8,14 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const clientConfig: BotConfig = await req.json();
+    const clientConfig = await req.json();
 
-    // Server-side defaulty mají přednost — browser nesmí přepsat instrumenty/risk/strategy
-    const serverConfig = loadServerConfig();
+    // VŽDY kódové defaulty — browser NEMŮŽE přepsat instrumenty/strategy/risk
     const config: BotConfig = {
-      // Credentials z klienta (nebo env vars)
-      credentials: clientConfig.credentials,
-      // Instrumenty, strategie, risk VŽDY ze serveru (ne z browseru)
-      instruments: serverConfig.instruments?.length > 0 ? serverConfig.instruments : DEFAULT_INSTRUMENTS,
-      strategy: serverConfig.strategy || DEFAULT_STRATEGY,
-      risk: serverConfig.risk || DEFAULT_RISK,
+      credentials: clientConfig.credentials || { apiKey: "", apiSecret: "", testnet: false },
+      instruments: DEFAULT_INSTRUMENTS,
+      strategy: DEFAULT_STRATEGY,
+      risk: DEFAULT_RISK,
       active: true,
     };
 
