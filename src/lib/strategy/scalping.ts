@@ -330,16 +330,20 @@ export function generateSignal(
     reasons.push(`ATR ${atrPercent.toFixed(3)}% OK`);
   }
 
-  // TREND FILTR — neobchoduj proti trendu
+  // TREND FILTR — JEN v TRENDING režimu (v RANGING jdeme proti trendu = mean reversion)
   const trend = getTrendDirection(closes);
-  if (trend === "UP" && totalSell > totalBuy) {
-    totalSell *= 0.5; // oslabí sell signál v uptrendu
-    reasons.push("Trend filtr: uptrend → sell oslaben");
-  } else if (trend === "DOWN" && totalBuy > totalSell) {
-    totalBuy *= 0.5; // oslabí buy signál v downtrendu
-    reasons.push("Trend filtr: downtrend → buy oslaben");
-  } else if (trend !== "NEUTRAL") {
-    reasons.push(`Trend: ${trend}`);
+  if (regime === "TRENDING") {
+    if (trend === "UP" && totalSell > totalBuy) {
+      totalSell *= 0.5;
+      reasons.push("Trend filtr: uptrend → sell oslaben");
+    } else if (trend === "DOWN" && totalBuy > totalSell) {
+      totalBuy *= 0.5;
+      reasons.push("Trend filtr: downtrend → buy oslaben");
+    } else if (trend !== "NEUTRAL") {
+      reasons.push(`Trend: ${trend}`);
+    }
+  } else {
+    reasons.push(`Trend filtr vypnut (RANGING režim — mean reversion)`);
   }
 
   // MULTI-TIMEFRAME CONFLUENCE

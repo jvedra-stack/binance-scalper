@@ -136,12 +136,12 @@ export function calculateTrailingStop(
     ? ((currentPrice - entryPrice) / entryPrice) * 100
     : ((entryPrice - currentPrice) / entryPrice) * 100;
 
-  // ATR-based prahy (nebo fallback na fixní %)
-  const breakevenThreshold = atr ? ((atr * 0.5) / entryPrice) * 100 : 0.2;
-  const trailingThreshold = atr ? ((atr * 1.0) / entryPrice) * 100 : 0.3;
+  // ATR-based prahy — breakeven až po pořádném profitu, ne hned
+  const breakevenThreshold = atr ? Math.max(0.3, ((atr * 1.5) / entryPrice) * 100) : 0.3;
+  const trailingThreshold = atr ? Math.max(0.5, ((atr * 2.0) / entryPrice) * 100) : 0.5;
   const trailDistance = atr
-    ? atr * 1.0 // ATR × 1.0 = volatilitě přizpůsobený trailing
-    : updated.highWaterMark * (trailingPercent / 100); // fallback fixní %
+    ? atr * 1.5 // širší trailing — aby netrigroval na šumu
+    : updated.highWaterMark * (trailingPercent / 100);
 
   // Update high water mark
   if (state.direction === "BUY") {
