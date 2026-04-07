@@ -859,14 +859,14 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
   const updatedSignals2 = [...getState().signals.filter((s) => s.symbol !== instrument.symbol), signal];
   setState({ signals: updatedSignals2 });
 
-  // Korelační filtr — blokuj duplicitní expozice na korelovaných coinech
+  // Korelační filtr — blokuj jen EXTRÉMNĚ korelované pozice (BTC/ETH/SOL jsou přirozeně korelované)
   if (globalState.__bybit_correlation) {
     const corrCheck = checkCorrelationRisk(
       instrument.symbol,
       signal.type as "BUY" | "SELL",
       state.openPositions,
       globalState.__bybit_correlation,
-      0.7
+      0.9
     );
     if (!corrCheck.allowed) {
       blockSignal(corrCheck.reason || "Korelační filtr");
