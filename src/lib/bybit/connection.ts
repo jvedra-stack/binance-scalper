@@ -658,9 +658,9 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
         continue;
       }
 
-      // Partial TP: na 1.0% zisku zavři 50% pozice, zbytek nech na trailing
+      // Partial TP: na 0.4% zisku zavři 50% pozice, zbytek nech na trailing
       const partialKey = `${pos.symbol}_${pos.direction}`;
-      if ((pos.profit || 0) > 0 && pnlPercent > 1.0 && !partialTPSet.has(partialKey)) {
+      if ((pos.profit || 0) > 0 && pnlPercent > 0.4 && !partialTPSet.has(partialKey)) {
         const halfQty = (pos.volume / 2);
         if (halfQty > 0) {
           console.log(`[PARTIAL TP] ${pos.symbol} ${pos.direction} — zavírám 50% @ ${currentPrice.toFixed(2)} (zisk ${pnlPercent.toFixed(1)}%)`);

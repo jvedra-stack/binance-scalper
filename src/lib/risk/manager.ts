@@ -136,11 +136,13 @@ export function calculateTrailingStop(
     ? ((currentPrice - entryPrice) / entryPrice) * 100
     : ((entryPrice - currentPrice) / entryPrice) * 100;
 
-  // ATR-based prahy — breakeven až po pořádném profitu, ne hned
-  const breakevenThreshold = atr ? Math.max(0.3, ((atr * 1.5) / entryPrice) * 100) : 0.3;
-  const trailingThreshold = atr ? Math.max(0.5, ((atr * 2.0) / entryPrice) * 100) : 0.5;
+  // Scalping-friendly prahy — zamkni zisk brzo
+  // Breakeven už při 0.15% zisku (pro 0.8% TP cíl je to rozumné)
+  // Trailing startuje při 0.3% zisku
+  const breakevenThreshold = 0.15;
+  const trailingThreshold = 0.3;
   const trailDistance = atr
-    ? atr * 1.5 // širší trailing — aby netrigroval na šumu
+    ? Math.max(atr * 0.8, entryPrice * 0.002) // ATR × 0.8 nebo min 0.2%
     : updated.highWaterMark * (trailingPercent / 100);
 
   // Update high water mark
