@@ -687,6 +687,28 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
       }
     }
 
+    // Reverse signal exit — pokud je otevřená pozice ale signál se silně obrátil, zavři ji
+    const currentSignals = getState().signals;
+    for (const pos of openPositions) {
+      const signal = currentSignals.find((s) => s.symbol === pos.symbol);
+      if (!signal || signal.confidence < 0.6) continue;
+      const signalAgainst = (pos.direction === "BUY" && signal.type === "SELL") ||
+                            (pos.direction === "SELL" && signal.type === "BUY");
+      if (signalAgainst) {
+        console.log(`[REVERSE EXIT] ${pos.symbol} ${pos.direction} — signál se obrátil na ${signal.type} (${(signal.confidence * 100).toFixed(0)}%) — zavírám`);
+        try {
+          await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
+          const tick = getState().lastTick?.[pos.symbol];
+          closeTradeRecord(pos, tick?.lastPrice || pos.openPrice, pos.profit || 0);
+          const trailKey = `${pos.symbol}_${pos.direction}`;
+          globalState.__bybit_trailing?.delete(trailKey);
+          globalState.__bybit_partialTP?.delete(trailKey);
+        } catch (err) {
+          console.error(`[REVERSE EXIT] Chyba: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+    }
+
     // Detekuj zavřené pozice
     const prevPositions = getState().openPositions;
     for (const prev of prevPositions) {

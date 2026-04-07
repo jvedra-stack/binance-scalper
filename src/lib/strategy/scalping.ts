@@ -209,15 +209,15 @@ function momentumScore(indicators: IndicatorValues, config: StrategyConfig, clos
     reasons.push(`StochRSI ${indicators.stochRsi.toFixed(0)} překoupeno`);
   }
 
-  // Price momentum — posledních 5 svíček
-  if (closes.length >= 5) {
-    const recentChange = ((closes[closes.length - 1] - closes[closes.length - 5]) / closes[closes.length - 5]) * 100;
-    if (recentChange > 0.3) {
+  // Price momentum — posledních 10 svíček (50 minut na 5min TF)
+  if (closes.length >= 10) {
+    const recentChange = ((closes[closes.length - 1] - closes[closes.length - 10]) / closes[closes.length - 10]) * 100;
+    if (recentChange > 0.5) {
       buy += 0.15;
-      reasons.push(`Momentum +${recentChange.toFixed(2)}% (5 candles)`);
-    } else if (recentChange < -0.3) {
+      reasons.push(`Momentum +${recentChange.toFixed(2)}% (10 candles)`);
+    } else if (recentChange < -0.5) {
       sell += 0.15;
-      reasons.push(`Momentum ${recentChange.toFixed(2)}% (5 candles)`);
+      reasons.push(`Momentum ${recentChange.toFixed(2)}% (10 candles)`);
     }
   }
 
@@ -368,20 +368,20 @@ export function generateSignal(
       }
     }
 
-    // Shoda všech timeframů → confidence boost
+    // Shoda všech timeframů → silný confidence boost / silné oslabení
     if (mtfTotal >= 2) {
       if (mtfBullish === mtfTotal && totalBuy > totalSell) {
-        totalBuy += 0.15;
-        reasons.push("MTF confluence: všechny TF bullish → +15% confidence");
+        totalBuy += 0.2;
+        reasons.push("MTF confluence: všechny TF bullish → +20% confidence");
       } else if (mtfBearish === mtfTotal && totalSell > totalBuy) {
-        totalSell += 0.15;
-        reasons.push("MTF confluence: všechny TF bearish → +15% confidence");
+        totalSell += 0.2;
+        reasons.push("MTF confluence: všechny TF bearish → +20% confidence");
       } else if (mtfBullish === mtfTotal && totalSell > totalBuy) {
-        totalSell *= 0.6; // proti MTF trendu → oslabení
-        reasons.push("MTF filtr: sell proti bullish MTF → oslaben");
+        totalSell *= 0.3; // SILNĚ oslabit sell proti bullish MTF
+        reasons.push("MTF filtr: sell proti bullish MTF → silně oslaben");
       } else if (mtfBearish === mtfTotal && totalBuy > totalSell) {
-        totalBuy *= 0.6;
-        reasons.push("MTF filtr: buy proti bearish MTF → oslaben");
+        totalBuy *= 0.3;
+        reasons.push("MTF filtr: buy proti bearish MTF → silně oslaben");
       }
     }
   }
