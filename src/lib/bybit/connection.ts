@@ -539,6 +539,8 @@ async function evaluateFundingArbitrage(client: BybitClient, config: BotConfig):
     const sl = direction === "BUY" ? currentPrice - slDist : currentPrice + slDist;
     const tp = direction === "BUY" ? currentPrice + tpDist : currentPrice - tpDist;
 
+    await client.cancelAllOrders(inst.symbol);
+
     try {
       const result = await client.placeOrder({
         symbol: inst.symbol,
@@ -548,6 +550,15 @@ async function evaluateFundingArbitrage(client: BybitClient, config: BotConfig):
         stopLoss: sl.toFixed(pricePrecision),
         takeProfit: tp.toFixed(pricePrecision),
       });
+
+      // FAIL-SAFE: SL musí být umístěný
+      if (!result.slPlaced) {
+        console.error(`[FUNDING FAIL-SAFE] ${inst.symbol} — SL nepoda\u0159il umístit, zavírám`);
+        try {
+          await client.closePosition(inst.symbol, direction === "BUY" ? "Buy" : "Sell", adjustedQty.toFixed(qtyPrecision));
+        } catch { /* ok */ }
+        continue;
+      }
 
       const trade: Trade = {
         id: `funding_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -645,8 +656,8 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
         }
       }
 
-      // Server-side SL: zavři pozice s > 1.2% ztrátou (safety net — Binance SL by měl chytit dřív)
-      if ((pos.profit || 0) < 0 && pnlPercent > 1.2) {
+      // Server-side SL: zavři pozice s > 0.7% ztrátou (safety net — Binance SL by měl chytit dřív)
+      if ((pos.profit || 0) < 0 && pnlPercent > 0.7) {
         console.log(`[SL] Zavírám ${pos.symbol} ${pos.direction} — ztráta ${pos.profit?.toFixed(2)} (${pnlPercent.toFixed(1)}%)`);
         try {
           await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", pos.volume.toString());
@@ -658,20 +669,10 @@ async function syncAndCheckPositions(client: BybitClient, config: BotConfig): Pr
         continue;
       }
 
-      // Partial TP: na 0.4% zisku zavři 50% pozice, zbytek nech na trailing
+      // Partial TP vypnut — snižoval EV. Necháme TP na Binance + trailing stop.
       const partialKey = `${pos.symbol}_${pos.direction}`;
-      if ((pos.profit || 0) > 0 && pnlPercent > 0.4 && !partialTPSet.has(partialKey)) {
-        const halfQty = (pos.volume / 2);
-        if (halfQty > 0) {
-          console.log(`[PARTIAL TP] ${pos.symbol} ${pos.direction} — zavírám 50% @ ${currentPrice.toFixed(2)} (zisk ${pnlPercent.toFixed(1)}%)`);
-          try {
-            await client.closePosition(pos.symbol, pos.direction === "BUY" ? "Buy" : "Sell", halfQty.toString());
-            partialTPSet.add(partialKey);
-          } catch (err) {
-            console.error(`[PARTIAL TP] Chyba: ${err instanceof Error ? err.message : err}`);
-          }
-        }
-      }
+      void partialTPSet;
+      void partialKey;
 
       // Server-side TP: zavři pozice s > 2.5% ziskem (safety net — nechej trailing/Binance TP pracovat)
       if (!trailState.trailingActivated && (pos.profit || 0) > 0 && pnlPercent > 2.5) {
@@ -912,6 +913,9 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
   // Garantovaný SL/TP
   const { sl, tp } = calculateSLTP(signal, instrument, signal.indicators.atr);
 
+  // Cleanup: zruš všechny visící ordery na symbolu (předchozí SL/TP které mohly zůstat)
+  await client.cancelAllOrders(instrument.symbol);
+
   try {
     const result = await client.placeOrder({
       symbol: instrument.symbol,
@@ -921,6 +925,17 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
       stopLoss: sl.toFixed(pricePrecision),
       takeProfit: tp.toFixed(pricePrecision),
     });
+
+    // FAIL-SAFE: pokud SL nepodaří umístit, hned zavři pozici!
+    if (!result.slPlaced) {
+      console.error(`[FAIL-SAFE] ${instrument.symbol} ${signal.type} — SL se nepodařil umístit, zavírám pozici`);
+      try {
+        await client.closePosition(instrument.symbol, signal.type === "BUY" ? "Buy" : "Sell", adjustedQty.toFixed(qtyPrecision));
+      } catch (err) {
+        console.error(`[FAIL-SAFE CLOSE] Chyba: ${err instanceof Error ? err.message : err}`);
+      }
+      return;
+    }
 
     const trade: Trade = {
       id: `trade_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -936,7 +951,7 @@ async function evaluateInstrument(client: BybitClient, instrument: InstrumentCon
     };
 
     saveTrade(trade);
-    console.log(`[TRADE] ${signal.type} ${instrument.symbol} @ ${signal.price} | Qty: ${adjustedQty} (${adjustedVolumeUSDT.toFixed(0)} USDT) | SL: ${sl.toFixed(pricePrecision)} TP: ${tp.toFixed(pricePrecision)} | Conf: ${(signal.confidence * 100).toFixed(0)}%`);
+    console.log(`[TRADE] ${signal.type} ${instrument.symbol} @ ${signal.price} | Qty: ${adjustedQty} (${adjustedVolumeUSDT.toFixed(0)} USDT) | SL: ${sl.toFixed(pricePrecision)} (${result.slPlaced ? "OK" : "FAIL"}) TP: ${tp.toFixed(pricePrecision)} (${result.tpPlaced ? "OK" : "FAIL"}) | Conf: ${(signal.confidence * 100).toFixed(0)}%`);
     notifyTradeOpen(trade).catch(() => {});
 
     setState({

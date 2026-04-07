@@ -294,7 +294,7 @@ export class BybitClient {
     price?: string;
     stopLoss?: string;
     takeProfit?: string;
-  }): Promise<{ orderId: string; orderLinkId: string }> {
+  }): Promise<{ orderId: string; orderLinkId: string; slPlaced: boolean; tpPlaced: boolean }> {
     const orderParams: Record<string, string | number> = {
       symbol: params.symbol,
       side: params.side === "Buy" ? "BUY" : "SELL",
@@ -308,33 +308,56 @@ export class BybitClient {
 
     const data = await this.request<{ orderId: number; clientOrderId: string }>("POST", "/fapi/v1/order", orderParams, true);
 
-    // Pokud máme SL/TP, přidej jako samostatné stoploss/takeprofit ordery
+    let slPlaced = false;
+    let tpPlaced = false;
+    const closeSide = params.side === "Buy" ? "SELL" : "BUY";
+
+    // Stop Loss — closePosition=true (NESMÍ být quantity!), MARK_PRICE pro stabilní triggery
     if (params.stopLoss && parseFloat(params.stopLoss) > 0) {
       try {
         await this.request("POST", "/fapi/v1/order", {
           symbol: params.symbol,
-          side: params.side === "Buy" ? "SELL" : "BUY",
+          side: closeSide,
           type: "STOP_MARKET",
           stopPrice: params.stopLoss,
-          quantity: params.qty,
           closePosition: "true",
+          workingType: "MARK_PRICE",
+          priceProtect: "true",
+          timeInForce: "GTE_GTC",
         }, true);
-      } catch { /* ok */ }
+        slPlaced = true;
+      } catch (err) {
+        console.error(`[SL ORDER FAIL] ${params.symbol}: ${err instanceof Error ? err.message : err}`);
+      }
     }
+
+    // Take Profit
     if (params.takeProfit && parseFloat(params.takeProfit) > 0) {
       try {
         await this.request("POST", "/fapi/v1/order", {
           symbol: params.symbol,
-          side: params.side === "Buy" ? "SELL" : "BUY",
+          side: closeSide,
           type: "TAKE_PROFIT_MARKET",
           stopPrice: params.takeProfit,
-          quantity: params.qty,
           closePosition: "true",
+          workingType: "MARK_PRICE",
+          priceProtect: "true",
+          timeInForce: "GTE_GTC",
         }, true);
-      } catch { /* ok */ }
+        tpPlaced = true;
+      } catch (err) {
+        console.error(`[TP ORDER FAIL] ${params.symbol}: ${err instanceof Error ? err.message : err}`);
+      }
     }
 
-    return { orderId: data.orderId.toString(), orderLinkId: data.clientOrderId };
+    return { orderId: data.orderId.toString(), orderLinkId: data.clientOrderId, slPlaced, tpPlaced };
+  }
+
+  // Zruší všechny otevřené ordery na symbolu (cleanup před opening nové pozice)
+  async cancelAllOrders(symbol: string): Promise<void> {
+    try {
+      await this.request("DELETE", "/fapi/v1/allOpenOrders", { symbol }, true);
+    } catch { /* ok */ }
   }
 
   async closePosition(symbol: string, side: "Buy" | "Sell", qty: string): Promise<{ orderId: string }> {
