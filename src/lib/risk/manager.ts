@@ -26,6 +26,13 @@ export function checkRisk(
     return { allowed: false, reason: `Max otevřených pozic (${config.maxOpenPositions}) dosažen` };
   }
 
+  // 2b. Max denních tradů (kvalita > kvantita)
+  const maxDaily = config.maxDailyTrades ?? 8;
+  const todayCount = todayTrades.length;
+  if (todayCount >= maxDaily) {
+    return { allowed: false, reason: `Max denních tradů (${maxDaily}) dosažen — kvalita > kvantita` };
+  }
+
   // 3. Žádný duplicitní trade na stejném symbolu stejným směrem
   const duplicit = openPositions.find(
     (t) => t.symbol === signal.symbol && t.direction === signal.type
@@ -78,10 +85,10 @@ export function calculateSLTP(
   const { price } = signal;
   const isBuy = signal.type === "BUY";
 
-  // Pokud máme ATR, použij dynamický SL/TP (R:R = 1:1.67)
+  // Pokud máme ATR, použij dynamický SL/TP (R:R = 1:2.5)
   if (atr && atr > 0) {
-    const slDistance = atr * 1.2;
-    const tpDistance = atr * 2.0;
+    const slDistance = atr * 1.0;
+    const tpDistance = atr * 2.5;
     return {
       sl: isBuy ? price - slDistance : price + slDistance,
       tp: isBuy ? price + tpDistance : price - tpDistance,

@@ -21,7 +21,7 @@ interface CandleRecord {
   ctmString: string;
 }
 
-import { ema, rsi, bollingerBands, atr, stochRsi, vwap } from "./indicators";
+import { ema, rsi, bollingerBands, atr, stochRsi, vwap, adx } from "./indicators";
 import { detectRegime } from "./regime";
 
 function extractData(candles: CandleRecord[]) {
@@ -258,6 +258,21 @@ export function generateSignal(
   const reasons: string[] = [];
   let totalBuy = 0;
   let totalSell = 0;
+
+  // ===== ADX FILTR =====
+  // Obchoduj jen pokud trh trenduje dostatečně silně (ADX > 22)
+  // Při ADX < 22 je trh choppy/ranging — všechny scalping signály jsou noise
+  const { highs: hgs, lows: lws } = extractData(candles);
+  const adxArr = adx(hgs, lws, closes, 14);
+  const currentAdx = adxArr.length > 0 ? adxArr[adxArr.length - 1] : 0;
+  reasons.push(`ADX: ${currentAdx.toFixed(1)}`);
+  if (currentAdx < 22) {
+    return {
+      type: "HOLD", symbol, price: currentPrice, timestamp: Date.now(),
+      confidence: 0, reasons: [...reasons, `ADX ${currentAdx.toFixed(1)} < 22 → trh netrenduje, neobchoduj`],
+      indicators,
+    };
+  }
 
   // Market Regime Detection — vyber strategie podle stavu trhu
   const { regime, reason: regimeReason } = detectRegime(candles);

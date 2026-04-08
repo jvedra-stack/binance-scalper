@@ -437,14 +437,14 @@ async function periodicCheck(): Promise<void> {
       } catch { /* ok */ }
     }
 
-    // Balance refresh každých ~5 minut (každý 37. check)
-    if (checkCount % 37 === 0) {
+    // Balance refresh každou minutu (každý ~7. periodic check = 56s)
+    if (checkCount % 7 === 0) {
       try {
         const bal = await client.getBalance();
         const equity = parseFloat(bal.list?.[0]?.totalEquity || "0");
         if (equity > 0) {
           setState({ balance: equity });
-          console.log(`[BALANCE] Aktuální balance: ${equity.toFixed(2)} USDT`);
+          console.log(`[BALANCE] ${equity.toFixed(2)} USDT`);
         }
       } catch { /* ok */ }
     }
@@ -473,9 +473,9 @@ async function periodicCheck(): Promise<void> {
     await evaluateInstrument(client, inst);
   }
 
-  // Funding Rate jako samostatná strategie
-  // Extrémní funding (> 0.03%) → otevři protisměrnou pozici
-  await evaluateFundingArbitrage(client, config);
+  // Funding arbitráž VYPNUTA — generovala náhodné trade bez TA confirmation
+  // a zhoršovala win rate. Funding rate se zohledňuje pouze jako modifikátor
+  // v evaluateInstrument (signal.confidence ± funding bias).
 }
 
 async function evaluateFundingArbitrage(client: BybitClient, config: BotConfig): Promise<void> {

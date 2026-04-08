@@ -166,6 +166,7 @@ export interface StrategyConfig {
 export interface RiskConfig {
   maxOpenPositions: number;
   maxDailyLoss: number; // v USDT
+  maxDailyTrades?: number; // max počet tradů denně (anti-overtrading)
   trailingStop: boolean;
   trailingStopPercent: number;
 }
@@ -197,14 +198,15 @@ export interface EngineState {
 // --- Defaultní konfigurace ---
 
 export const DEFAULT_INSTRUMENTS: InstrumentConfig[] = [
-  { symbol: "BTCUSDT", label: "Bitcoin", enabled: true, volume: 3000, slPercent: 0.4, tpPercent: 0.8 },
-  { symbol: "ETHUSDT", label: "Ethereum", enabled: true, volume: 3000, slPercent: 0.4, tpPercent: 0.8 },
-  { symbol: "SOLUSDT", label: "Solana", enabled: true, volume: 3000, slPercent: 0.5, tpPercent: 0.9 },
-  { symbol: "DOGEUSDT", label: "Doge", enabled: false, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
-  { symbol: "PEPEUSDT", label: "Pepe", enabled: false, volume: 1000, slPercent: 0.6, tpPercent: 1.0 },
-  { symbol: "XRPUSDT", label: "XRP", enabled: false, volume: 1000, slPercent: 0.4, tpPercent: 0.8 },
-  { symbol: "AVAXUSDT", label: "Avalanche", enabled: false, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
-  { symbol: "SUIUSDT", label: "Sui", enabled: false, volume: 1000, slPercent: 0.5, tpPercent: 0.9 },
+  // R:R 1:2.5 — SL 0.4%, TP 1.0% — break-even win rate jen ~32%
+  { symbol: "BTCUSDT", label: "Bitcoin", enabled: true, volume: 3000, slPercent: 0.4, tpPercent: 1.0 },
+  { symbol: "ETHUSDT", label: "Ethereum", enabled: true, volume: 3000, slPercent: 0.4, tpPercent: 1.0 },
+  { symbol: "SOLUSDT", label: "Solana", enabled: true, volume: 3000, slPercent: 0.5, tpPercent: 1.25 },
+  { symbol: "DOGEUSDT", label: "Doge", enabled: false, volume: 1000, slPercent: 0.5, tpPercent: 1.25 },
+  { symbol: "PEPEUSDT", label: "Pepe", enabled: false, volume: 1000, slPercent: 0.6, tpPercent: 1.5 },
+  { symbol: "XRPUSDT", label: "XRP", enabled: false, volume: 1000, slPercent: 0.4, tpPercent: 1.0 },
+  { symbol: "AVAXUSDT", label: "Avalanche", enabled: false, volume: 1000, slPercent: 0.5, tpPercent: 1.25 },
+  { symbol: "SUIUSDT", label: "Sui", enabled: false, volume: 1000, slPercent: 0.5, tpPercent: 1.25 },
 ];
 
 export const DEFAULT_STRATEGY: StrategyConfig = {
@@ -216,12 +218,13 @@ export const DEFAULT_STRATEGY: StrategyConfig = {
   bbPeriod: 20,
   bbStdDev: 2,
   atrPeriod: 14,
-  minConfidence: 0.62,
+  minConfidence: 0.70,
 };
 
 export const DEFAULT_RISK: RiskConfig = {
-  maxOpenPositions: 6,
-  maxDailyLoss: 100, // USDT
+  maxOpenPositions: 3,
+  maxDailyLoss: 30, // USDT — 8% z 375 účtu
+  maxDailyTrades: 8, // max 8 tradů denně (kvalita > kvantita)
   trailingStop: true,
   trailingStopPercent: 0.2,
 };
